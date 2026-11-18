@@ -64,30 +64,7 @@ goto menu
 :computer
 call :download "cmptr_info.pyw" "Computer Info"
 if errorlevel 1 goto menu
-echo.
-echo Starting Computer Info...
-where pyw.exe >nul 2>&1
-if not errorlevel 1 (
-    start "" pyw.exe -3 "%INSTALL_DIR%\cmptr_info.pyw"
-    goto menu
-)
-where pythonw.exe >nul 2>&1
-if not errorlevel 1 (
-    start "" pythonw.exe "%INSTALL_DIR%\cmptr_info.pyw"
-    goto menu
-)
-where py.exe >nul 2>&1
-if not errorlevel 1 (
-    start "" py.exe -3 "%INSTALL_DIR%\cmptr_info.pyw"
-    goto menu
-)
-where python.exe >nul 2>&1
-if not errorlevel 1 (
-    start "" python.exe "%INSTALL_DIR%\cmptr_info.pyw"
-    goto menu
-)
-echo Python could not be found. Choose option 1 to install it.
-pause
+start "" "%INSTALL_DIR%\cmptr_info.pyw"
 goto menu
 
 :folder
