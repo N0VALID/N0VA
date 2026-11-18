@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title N0VA - Tool Hub
+title N0VA
 color 0B
 
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
@@ -11,13 +11,13 @@ cls
 echo.
 echo  ========================================
 echo               N 0 V A
-echo              TOOL INSTALLER
+echo                TOOL HUB
 echo  ========================================
 echo.
-echo   [1] Install Python 3.14 (WinGet)
-echo   [2] Download EXE Studio
-echo   [3] Download and Run Computer Info
-echo   [4] Open Downloads Folder
+echo   [1] Install Python
+echo   [2] Get EXE Studio
+echo   [3] Open Computer Info
+echo   [4] Downloads
 echo   [0] Exit
 echo.
 echo  ========================================
@@ -40,14 +40,14 @@ where winget >nul 2>&1
 if errorlevel 1 (
     echo WinGet not found. Install or update App Installer from Microsoft.
 ) else (
-    echo Installing Python 3.14 from the official WinGet source...
+    echo Installing Python...
     winget install --id Python.Python.3.14 --exact --source winget
     if errorlevel 1 (
         echo.
-        echo Python installation did not complete. See the messages above.
+        echo Python installation failed.
     ) else (
         echo.
-        echo Python installation command completed. Reopen this window if Python is not found yet.
+        echo Python installation complete.
     )
 )
 pause
@@ -55,6 +55,10 @@ goto menu
 
 :studio
 call :download "exe_compiler.pyw" "EXE Studio"
+if errorlevel 1 goto menu
+echo.
+echo EXE Studio downloaded.
+pause
 goto menu
 
 :computer
@@ -133,10 +137,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Download complete: %INSTALL_DIR%\%~1
-echo Python is required to open .pyw files.
-echo Review downloaded scripts before running them.
-pause
+echo Saved to: %INSTALL_DIR%\%~1
 exit /b 0
 
 :done
