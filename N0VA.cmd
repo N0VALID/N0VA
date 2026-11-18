@@ -35,87 +35,66 @@ pause
 goto menu
 
 :python
-cls
 where winget >nul 2>&1
-if errorlevel 1 (
-    echo WinGet not found. Install or update App Installer from Microsoft.
-) else (
-    echo Installing Python...
-    winget install --id Python.Python.3.14 --exact --source winget
-    if errorlevel 1 (
-        echo.
-        echo Python installation failed.
-    ) else (
-        echo.
-        echo Python installation complete.
-    )
-)
-pause
-goto menu
+if errorlevel 1 goto failed
+winget install --id Python.Python.3.14 --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
 
 :studio
-call :download "exe_compiler.pyw" "EXE Studio"
-if errorlevel 1 goto menu
-echo.
-echo EXE Studio downloaded.
-pause
-goto menu
+call :download "exe_compiler.pyw"
+if errorlevel 1 goto failed
+goto complete
 
 :computer
-call :download "cmptr_info.pyw" "Computer Info"
-if errorlevel 1 goto menu
-start "" "%INSTALL_DIR%\cmptr_info.pyw"
-goto menu
+call :download "cmptr_info.pyw"
+if errorlevel 1 goto failed
+start "" "%INSTALL_DIR%\cmptr_info.pyw" >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
 
 :folder
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-if exist "%INSTALL_DIR%" (
-    start "" "%INSTALL_DIR%"
-) else (
-    echo Could not create the download folder.
-    pause
-)
-goto menu
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
+if not exist "%INSTALL_DIR%" goto failed
+start "" "%INSTALL_DIR%" >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
 
 :download
-cls
-echo Downloading %~2...
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-if not exist "%INSTALL_DIR%" (
-    echo Could not create %INSTALL_DIR%.
-    pause
-    exit /b 1
-)
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
+if not exist "%INSTALL_DIR%" exit /b 1
 where curl.exe >nul 2>&1
-if errorlevel 1 (
-    echo curl.exe is not available on this computer.
-    pause
-    exit /b 1
-)
+if errorlevel 1 exit /b 1
 set "TEMP_FILE=%INSTALL_DIR%\%~1.partial"
 if exist "%TEMP_FILE%" del /q "%TEMP_FILE%" >nul 2>&1
-curl.exe --fail --location --silent --show-error --retry 2 "%BASE_URL%/%~1" --output "%TEMP_FILE%"
-if errorlevel 1 (
-    if exist "%TEMP_FILE%" del /q "%TEMP_FILE%" >nul 2>&1
-    echo Download failed. Check your internet connection and the N0VA repository.
-    pause
-    exit /b 1
-)
-for %%F in ("%TEMP_FILE%") do if %%~zF EQU 0 (
-    del /q "%TEMP_FILE%" >nul 2>&1
-    echo Download failed: empty file.
-    pause
-    exit /b 1
-)
-move /y "%TEMP_FILE%" "%INSTALL_DIR%\%~1" >nul
-if errorlevel 1 (
-    echo Could not save the downloaded file.
-    pause
-    exit /b 1
-)
-echo.
-echo Saved to: %INSTALL_DIR%\%~1
+curl.exe --fail --location --silent --retry 2 "%BASE_URL%/%~1" --output "%TEMP_FILE%" >nul 2>&1
+if errorlevel 1 goto download_failed
+for %%F in ("%TEMP_FILE%") do if %%~zF EQU 0 goto download_failed
+move /y "%TEMP_FILE%" "%INSTALL_DIR%\%~1" >nul 2>&1
+if errorlevel 1 goto download_failed
 exit /b 0
+
+:download_failed
+if exist "%TEMP_FILE%" del /q "%TEMP_FILE%" >nul 2>&1
+exit /b 1
+
+:complete
+cls
+echo.
+echo Done.
+echo.
+set "continue="
+set /p "continue=Press Enter to continue..."
+goto menu
+
+:failed
+cls
+echo.
+echo Failed.
+echo.
+set "continue="
+set /p "continue=Press Enter to continue..."
+goto menu
 
 :done
 endlocal
