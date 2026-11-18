@@ -21,10 +21,9 @@ echo   [2] Get EXE Compiler
 echo   [3] Computer Info
 echo   [4] Open N0VA Folder
 echo   [5] Chris Titus Tech WinUtil
-echo   [6] Install PowerToys
-echo   [7] Update Installed Apps
-echo   [8] Disk Cleanup
-echo   [9] Startup Apps
+echo   [6] Update Installed Apps
+echo   [7] Disk Cleanup
+echo   [8] Startup Apps
 echo   [0] Exit
 echo.
 echo  ========================================
@@ -36,10 +35,9 @@ if "%choice%"=="2" goto studio
 if "%choice%"=="3" goto computer
 if "%choice%"=="4" goto folder
 if "%choice%"=="5" goto winutil
-if "%choice%"=="6" goto powertoys
-if "%choice%"=="7" goto updates
-if "%choice%"=="8" goto cleanup
-if "%choice%"=="9" goto startup
+if "%choice%"=="6" goto updates
+if "%choice%"=="7" goto cleanup
+if "%choice%"=="8" goto startup
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -70,17 +68,13 @@ powershell.exe -NoProfile -Command "irm 'https://christitus.com/win' | iex" >nul
 if errorlevel 1 goto failed
 goto complete
 
-:powertoys
-where winget >nul 2>&1
-if errorlevel 1 goto failed
-winget install --id Microsoft.PowerToys --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity >nul 2>&1
-if errorlevel 1 goto failed
-goto complete
-
 :updates
+cls
 where winget >nul 2>&1
 if errorlevel 1 goto failed
-winget upgrade --all --silent --accept-package-agreements --accept-source-agreements --disable-interactivity >nul 2>&1
+echo Updating installed apps...
+echo.
+winget upgrade --all --accept-package-agreements --accept-source-agreements
 if errorlevel 1 goto failed
 goto complete
 
