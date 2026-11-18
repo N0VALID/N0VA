@@ -24,6 +24,7 @@ echo   [5] Chris Titus Tech WinUtil
 echo   [6] Update Installed Apps
 echo   [7] Disk Cleanup
 echo   [8] Startup Apps
+echo   [9] Command Explorer
 echo   [0] Exit
 echo.
 echo  ========================================
@@ -38,6 +39,7 @@ if "%choice%"=="5" goto winutil
 if "%choice%"=="6" goto updates
 if "%choice%"=="7" goto cleanup
 if "%choice%"=="8" goto startup
+if "%choice%"=="9" goto explorer
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -60,6 +62,13 @@ goto complete_download
 call :download "cmptr_info.pyw"
 if errorlevel 1 goto failed
 start "" "%INSTALL_DIR%\cmptr_info.pyw" >nul 2>&1
+if errorlevel 1 goto failed
+goto complete_download
+
+:explorer
+call :download "Python_Command_Explorer_Pro.pyw"
+if errorlevel 1 goto failed
+start "" "%INSTALL_DIR%\Python_Command_Explorer_Pro.pyw" >nul 2>&1
 if errorlevel 1 goto failed
 goto complete_download
 
