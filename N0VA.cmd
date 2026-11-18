@@ -5,7 +5,7 @@ title N0VA - Tool Hub
 color 0B
 
 :: CHANGE THIS TO YOUR GITHUB USERNAME
-set "N0VALID"
+set "GH_USER=N0VALID"
 
 :: N0VA download folder
 set "INSTALL_DIR=%USERPROFILE%\Downloads\N0VA"
