@@ -66,7 +66,7 @@ if errorlevel 1 goto failed
 goto complete_download
 
 :winutil
-start "" "https://winutil.christitus.com/guides/getting-started/" >nul 2>&1
+powershell.exe -NoProfile -Command "irm 'https://christitus.com/win' | iex" >nul 2>&1
 if errorlevel 1 goto failed
 goto complete
 
