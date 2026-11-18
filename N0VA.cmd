@@ -4,7 +4,9 @@ title N0VA
 color 0B
 
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
-set "INSTALL_DIR=%USERPROFILE%\Downloads\N0VA"
+set "DESKTOP_DIR=%USERPROFILE%\Desktop"
+for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
+set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 
 :menu
 cls
@@ -17,7 +19,7 @@ echo.
 echo   [1] Install Python
 echo   [2] Get EXE Studio
 echo   [3] Open Computer Info
-echo   [4] Downloads
+echo   [4] Open N0VA Folder
 echo   [0] Exit
 echo.
 echo  ========================================
@@ -44,14 +46,14 @@ goto complete
 :studio
 call :download "exe_compiler.pyw"
 if errorlevel 1 goto failed
-goto complete
+goto complete_download
 
 :computer
 call :download "cmptr_info.pyw"
 if errorlevel 1 goto failed
 start "" "%INSTALL_DIR%\cmptr_info.pyw" >nul 2>&1
 if errorlevel 1 goto failed
-goto complete
+goto complete_download
 
 :folder
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
@@ -77,6 +79,16 @@ exit /b 0
 :download_failed
 if exist "%TEMP_FILE%" del /q "%TEMP_FILE%" >nul 2>&1
 exit /b 1
+
+:complete_download
+cls
+echo.
+echo Done.
+echo Saved in Desktop.
+echo.
+set "continue="
+set /p "continue=Press Enter to continue..."
+goto menu
 
 :complete
 cls
