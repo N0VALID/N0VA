@@ -20,6 +20,11 @@ echo   [1] Install Python
 echo   [2] Get EXE Compiler
 echo   [3] Computer Info
 echo   [4] Open N0VA Folder
+echo   [5] Chris Titus Tech WinUtil
+echo   [6] Install PowerToys
+echo   [7] Update Installed Apps
+echo   [8] Disk Cleanup
+echo   [9] Startup Apps
 echo   [0] Exit
 echo.
 echo  ========================================
@@ -30,6 +35,11 @@ if "%choice%"=="1" goto python
 if "%choice%"=="2" goto studio
 if "%choice%"=="3" goto computer
 if "%choice%"=="4" goto folder
+if "%choice%"=="5" goto winutil
+if "%choice%"=="6" goto powertoys
+if "%choice%"=="7" goto updates
+if "%choice%"=="8" goto cleanup
+if "%choice%"=="9" goto startup
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -54,6 +64,35 @@ if errorlevel 1 goto failed
 start "" "%INSTALL_DIR%\cmptr_info.pyw" >nul 2>&1
 if errorlevel 1 goto failed
 goto complete_download
+
+:winutil
+start "" "https://winutil.christitus.com/guides/getting-started/" >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
+
+:powertoys
+where winget >nul 2>&1
+if errorlevel 1 goto failed
+winget install --id Microsoft.PowerToys --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
+
+:updates
+where winget >nul 2>&1
+if errorlevel 1 goto failed
+winget upgrade --all --silent --accept-package-agreements --accept-source-agreements --disable-interactivity >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
+
+:cleanup
+start "" cleanmgr.exe >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
+
+:startup
+start "" "ms-settings:startupapps" >nul 2>&1
+if errorlevel 1 goto failed
+goto complete
 
 :folder
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
