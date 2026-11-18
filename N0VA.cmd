@@ -17,8 +17,8 @@ echo                TOOL HUB
 echo  ========================================
 echo.
 echo   [1] Install Python
-echo   [2] Get EXE Studio
-echo   [3] Open Computer Info
+echo   [2] Get EXE Compiler
+echo   [3] Computer Info
 echo   [4] Open N0VA Folder
 echo   [0] Exit
 echo.
