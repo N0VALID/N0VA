@@ -29,11 +29,11 @@ cls
 set "N0VA_VIEW=menu"
 powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 if errorlevel 1 (
-    echo N0VA - Made by N0VALID - v1.5
+    echo N0VA - Made by N0VALID - v1.6
     echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
     echo [9] Command Explorer  [10] Install Brave  [11] Install Steam
-    echo [12] Install all Python packages    [0] Exit
+    echo [12] Install all Python packages    [13] Install RustDesk    [0] Exit
 )
 set "N0VA_VIEW="
 set "choice="
@@ -50,6 +50,7 @@ if "%choice%"=="9" goto explorer
 if "%choice%"=="10" goto brave
 if "%choice%"=="11" goto steam
 if "%choice%"=="12" goto dependencies
+if "%choice%"=="13" goto rustdesk
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -101,6 +102,12 @@ goto menu
 :steam
 cls
 call :install_app "Valve.Steam"
+pause
+goto menu
+
+:rustdesk
+cls
+call :install_app "RustDesk.RustDesk"
 pause
 goto menu
 
@@ -336,9 +343,10 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[4] Open N0VA Folder              [8] Startup Apps         ', 'Cyan'),
         @('[9] Command Explorer             [10] Install Brave       ', 'Green'),
         @('[11] Install Steam               [12] All Python packages ', 'Cyan'),
+        @('[13] Install RustDesk                                     ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.5', 'Magenta'),
+        @('[0] Exit                                             v1.6', 'Magenta'),
         @('', 'Black')
     )
     $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
