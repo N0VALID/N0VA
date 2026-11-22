@@ -36,12 +36,12 @@ if "%choice%"=="100" goto previous_page
 goto dispatch
 
 :menu_fallback
-echo N0VA - Made by N0VALID - v1.8 - Page %N0VA_PAGE% of 2
+echo N0VA - Made by N0VALID - v1.9 - Page %N0VA_PAGE% of 2
 if "%N0VA_PAGE%"=="1" (
     echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
     echo [9] Command Explorer [10] Brave [11] Steam [12] Python packages
-    echo [13] RustDesk
+    echo [13] RustDesk  [21] Seemless 0S MODE
 ) else (
     echo [14] 7-Zip [15] Notepad++ [16] VS Code [17] Git
     echo [18] VLC [19] Everything Search [20] PowerToys
@@ -76,6 +76,7 @@ if "%choice%"=="17" goto git_install
 if "%choice%"=="18" goto vlc
 if "%choice%"=="19" goto everything
 if "%choice%"=="20" goto powertoys
+if "%choice%"=="21" goto seamless_os
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -88,6 +89,22 @@ goto menu
 
 :previous_page
 set "N0VA_PAGE=1"
+goto menu
+
+:seamless_os
+set "N0VA_PAGE=1"
+echo Starting Seemless 0S MODE...
+call :download "SeemlessOS.ps1"
+if errorlevel 1 (
+    echo Could not download Seemless 0S MODE. Check your connection and retry.
+    pause
+    goto menu
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_DIR%\SeemlessOS.ps1" -InstallDir "%INSTALL_DIR%"
+if errorlevel 1 (
+    echo Seemless 0S MODE stopped with an error. See the details above.
+    pause
+)
 goto menu
 
 :python
@@ -414,7 +431,7 @@ function Read-NovaMenuChoice {
             'Enter' {
                 if ($typed.Length -gt 0) {
                     $number = [int]$typed
-                    if ($number -eq 0 -or ($Page -eq 1 -and $number -ge 1 -and $number -le 13) -or
+                    if ($number -eq 0 -or ($Page -eq 1 -and (($number -ge 1 -and $number -le 13) -or $number -eq 21)) -or
                         ($Page -eq 2 -and $number -ge 14 -and $number -le 20)) {
                         [Console]::WriteLine()
                         return $number
@@ -474,9 +491,9 @@ function Get-NovaMenuRows {
         @('[9] Command Explorer             [10] Install Brave       ', 'Green'),
         @('[11] Install Steam               [12] All Python packages ', 'Cyan'),
         @('[13] Install RustDesk                                     ', 'Green'),
-        @('', 'Black'),
+        @('[21] Seemless 0S MODE - terminal desktop', 'Cyan'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.8', 'Magenta'),
+        @('[0] Exit                                             v1.9', 'Magenta'),
         @('[A] Previous page                       [D] Next page', 'Cyan')
     )
     if ($page -eq 2) {
@@ -490,6 +507,7 @@ function Get-NovaMenuRows {
         $rows[16] = @('', 'Black')
         $rows[17] = @('', 'Black')
         $rows[18] = @('', 'Black')
+        $rows[19] = @('', 'Black')
     }
     return ,$rows
 }

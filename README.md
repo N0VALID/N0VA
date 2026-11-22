@@ -1,6 +1,6 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 1.8 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation uses the same running menu process and cached frames to avoid a blank screen between pages. It stops at the first and last pages, and returning from a tool keeps the current page.
+A Windows tool hub made by N0VALID. Version 1.9 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation uses the same running menu process and cached frames to avoid a blank screen between pages. It stops at the first and last pages, and returning from a tool keeps the current page.
 
 ## Page 1 - Tools and setup
 
@@ -19,6 +19,7 @@ A Windows tool hub made by N0VALID. Version 1.8 includes RGB Matrix rain, a cent
 | 11 | Install Steam |
 | 12 | Install all Python dependencies used by the N0VA tools |
 | 13 | Install RustDesk |
+| 21 | Open Seemless 0S MODE, a Windows-style terminal desktop |
 | 0 | Close N0VA and CMD |
 
 ## Page 2 - Useful downloads
@@ -39,12 +40,31 @@ The Python setup detects an existing interpreter or installs Python if needed, e
 
 WinUtil opens in a separate administrator PowerShell window and leaves errors visible there. Download or elevation errors remain visible in N0VA.
 
+## Seemless 0S MODE
+
+Choose **21** on page 1 to download and open the terminal desktop. It runs inside the current terminal and returns to N0VA when closed. It does not replace your Windows desktop or change your Windows shell.
+
+The desktop includes a Start menu, file explorer, web reader, app installer, and control panel. App downloads use WinGet, with visible progress and installation results. The explorer navigates folders and opens selected files through their Windows associations. The web reader shows readable page text and links; use its external browser action for sign-ins, videos, or pages that require JavaScript.
+
+| Key | Desktop action |
+| --- | --- |
+| S | Toggle the Start menu |
+| F1 / F2 / F3 | Desktop / File Explorer / Web Reader |
+| F4 / F5 | App Center / Control Panel |
+| Arrows / Enter | Select and open |
+| Esc | Cancel a dialog or return to the desktop |
+| F10 | Return to N0VA |
+
+In File Explorer, `N` opens the N0VA downloads folder and `L` enters a folder path. In Web Reader, `L` enters a URL or search, `Tab` switches to links, `B` goes back, and `O` opens the page in your normal browser. App Center supports `/` search. Input fields support `Ctrl+A` to replace their contents.
+
+The mode is delivered as `SeemlessOS.ps1` in your Desktop N0VA folder. Windows PowerShell 5.1 and Windows Terminal are supported; no Python packages are required for the desktop.
+
 ## Run the latest N0VA
 
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.8" -o "%TEMP%\N0VA-v1.8.cmd" && "%TEMP%\N0VA-v1.8.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.9" -o "%TEMP%\N0VA-v1.9.cmd" && "%TEMP%\N0VA-v1.9.cmd"
 ```
 
 ## Adding tools
