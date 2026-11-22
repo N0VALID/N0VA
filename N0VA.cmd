@@ -23,21 +23,37 @@ set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
 for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
 set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
+set "N0VA_PAGE=1"
 
 :menu
 cls
 set "N0VA_VIEW=menu"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
-if errorlevel 1 (
-    echo N0VA - Made by N0VALID - v1.6
-    echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
-    echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
-    echo [9] Command Explorer  [10] Install Brave  [11] Install Steam
-    echo [12] Install all Python packages    [13] Install RustDesk    [0] Exit
-)
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 250 }"
+set "choice=%errorlevel%"
 set "N0VA_VIEW="
+if "%choice%"=="250" goto menu_fallback
+if "%choice%"=="101" goto next_page
+if "%choice%"=="100" goto previous_page
+goto dispatch
+
+:menu_fallback
+echo N0VA - Made by N0VALID - v1.7 - Page %N0VA_PAGE% of 2
+if "%N0VA_PAGE%"=="1" (
+    echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
+    echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
+    echo [9] Command Explorer [10] Brave [11] Steam [12] Python packages
+    echo [13] RustDesk
+) else (
+    echo [14] 7-Zip [15] Notepad++ [16] VS Code [17] Git
+    echo [18] VLC [19] Everything Search [20] PowerToys
+)
+echo [A] Previous page  [D] Next page  [0] Exit
 set "choice="
-set /p "choice="
+set /p "choice=N0VA > "
+if /i "%choice%"=="d" goto next_page
+if /i "%choice%"=="a" goto previous_page
+
+:dispatch
 if "%choice%"=="1" goto python
 if "%choice%"=="2" goto studio
 if "%choice%"=="3" goto computer
@@ -51,10 +67,25 @@ if "%choice%"=="10" goto brave
 if "%choice%"=="11" goto steam
 if "%choice%"=="12" goto dependencies
 if "%choice%"=="13" goto rustdesk
+if "%choice%"=="14" goto sevenzip
+if "%choice%"=="15" goto notepad
+if "%choice%"=="16" goto vscode
+if "%choice%"=="17" goto git_install
+if "%choice%"=="18" goto vlc
+if "%choice%"=="19" goto everything
+if "%choice%"=="20" goto powertoys
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
 pause
+goto menu
+
+:next_page
+set "N0VA_PAGE=2"
+goto menu
+
+:previous_page
+set "N0VA_PAGE=1"
 goto menu
 
 :python
@@ -108,6 +139,48 @@ goto menu
 :rustdesk
 cls
 call :install_app "RustDesk.RustDesk"
+pause
+goto menu
+
+:sevenzip
+cls
+call :install_app "7zip.7zip"
+pause
+goto menu
+
+:notepad
+cls
+call :install_app "Notepad++.Notepad++"
+pause
+goto menu
+
+:vscode
+cls
+call :install_app "Microsoft.VisualStudioCode"
+pause
+goto menu
+
+:git_install
+cls
+call :install_app "Git.Git"
+pause
+goto menu
+
+:vlc
+cls
+call :install_app "VideoLAN.VLC"
+pause
+goto menu
+
+:everything
+cls
+call :install_app "voidtools.Everything"
+pause
+goto menu
+
+:powertoys
+cls
+call :install_app "Microsoft.PowerToys"
 pause
 goto menu
 
@@ -321,7 +394,44 @@ function Write-NovaCentered {
     if ($NoNewline) { [Console]::Write($output) }
     else { [Console]::WriteLine($output) }
 }
+function Read-NovaMenuChoice {
+    param([int]$Page)
+    $typed = ''
+    while ($true) {
+        $key = [Console]::ReadKey($true)
+        switch ($key.Key) {
+            'A' { return 100 }
+            'D' { return 101 }
+            'Backspace' {
+                if ($typed.Length -gt 0) {
+                    $typed = $typed.Substring(0, $typed.Length - 1)
+                    [Console]::Write("`b `b")
+                }
+                continue
+            }
+            'Enter' {
+                if ($typed.Length -gt 0) {
+                    $number = [int]$typed
+                    if ($number -eq 0 -or ($Page -eq 1 -and $number -ge 1 -and $number -le 13) -or
+                        ($Page -eq 2 -and $number -ge 14 -and $number -le 20)) {
+                        [Console]::WriteLine()
+                        return $number
+                    }
+                    for ($i = 0; $i -lt $typed.Length; $i++) { [Console]::Write("`b `b") }
+                    $typed = ''
+                }
+                continue
+            }
+        }
+        if ($key.KeyChar -ge '0' -and $key.KeyChar -le '9' -and $typed.Length -lt 2) {
+            $typed += [string]$key.KeyChar
+            [Console]::Write($key.KeyChar)
+        }
+    }
+}
 if ($env:N0VA_VIEW -eq 'menu') {
+    $page = 1
+    if ($env:N0VA_PAGE -eq '2') { $page = 2 }
     [Console]::BackgroundColor = 'Black'
     [Console]::Clear()
     $rows = @(
@@ -333,7 +443,7 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('', 'Black'),
         @('T O O L   H U B', 'Green'),
         @('Made by N0VALID', 'Magenta'),
-        @('', 'Black'),
+        @('PAGE 1 / 2 - TOOLS AND SETUP', 'Cyan'),
         @('==================================================================', 'DarkCyan'),
         @('SETUP AND TOOLS                   WINDOWS                 ', 'Cyan'),
         @('', 'Black'),
@@ -346,9 +456,21 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[13] Install RustDesk                                     ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.6', 'Magenta'),
-        @('', 'Black')
+        @('[0] Exit                                             v1.7', 'Magenta'),
+        @('[A] Previous page                       [D] Next page', 'Cyan')
     )
+    if ($page -eq 2) {
+        # Keep the title, frame and footer in the same place on both pages.
+        $rows[8] = @('PAGE 2 / 2 - USEFUL DOWNLOADS', 'Cyan')
+        $rows[10] = @('FILES AND EDITORS                 DEVELOPMENT AND UTILITIES', 'Cyan')
+        $rows[12] = @('[14] Install 7-Zip                [16] Install VS Code     ', 'Green')
+        $rows[13] = @('[15] Install Notepad++            [17] Install Git         ', 'Cyan')
+        $rows[14] = @('[18] Install VLC                  [19] Everything Search   ', 'Green')
+        $rows[15] = @('[20] Install PowerToys                                    ', 'Cyan')
+        $rows[16] = @('', 'Black')
+        $rows[17] = @('', 'Black')
+        $rows[18] = @('', 'Black')
+    }
     $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
     for ($blank = 0; $blank -lt $top; $blank++) { [Console]::WriteLine() }
     $rowIndex = 0
@@ -357,7 +479,7 @@ if ($env:N0VA_VIEW -eq 'menu') {
         $rowIndex++
     }
     Write-NovaCentered -Text 'N0VA > ' -Color Green -NoNewline
-    return
+    exit (Read-NovaMenuChoice -Page $page)
 }
 try {
     Add-Type -TypeDefinition @'
