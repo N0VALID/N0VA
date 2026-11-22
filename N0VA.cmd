@@ -3,6 +3,12 @@ setlocal EnableExtensions
 title N0VA
 color 0B
 
+rem Run the embedded startup once, before entering the tool menu.
+set "N0VA_LAUNCHER=%~f0"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { }" 2>nul
+set "N0VA_LAUNCHER="
+color 0B
+
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
 for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
@@ -14,6 +20,7 @@ echo.
 echo  ========================================
 echo               N 0 V A
 echo                TOOL HUB
+echo           Made by N0VALID
 echo  ========================================
 echo.
 echo   [1] Install Python
@@ -153,3 +160,107 @@ goto menu
 :done
 endlocal
 exit /b 0
+
+# N0VA_STARTUP_PS
+# This section is read by PowerShell; cmd exits above before reaching it.
+$ErrorActionPreference = 'Stop'
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class N0VAWindow {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleDisplayMode(IntPtr output, uint flags, out COORD size);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+    [StructLayout(LayoutKind.Sequential)] public struct COORD { public short X; public short Y; }
+}
+'@
+    $size = New-Object N0VAWindow+COORD
+    $fullscreen = [N0VAWindow]::SetConsoleDisplayMode([N0VAWindow]::GetStdHandle(-11), 1, [ref]$size)
+    if (-not $fullscreen) {
+        # Hosts that cannot enter console fullscreen get a maximized window.
+        [void][N0VAWindow]::ShowWindow([N0VAWindow]::GetConsoleWindow(), 3)
+    }
+} catch { }
+$previousColor = [Console]::ForegroundColor
+$previousBackground = [Console]::BackgroundColor
+$previousCursor = [Console]::CursorVisible
+try {
+    [Console]::BackgroundColor = 'Black'
+    [Console]::ForegroundColor = 'Cyan'
+    [Console]::CursorVisible = $false
+    [Console]::Clear()
+    # Independent falling streams, with bright heads and dark green tails.
+    $random = New-Object System.Random
+    $glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:<>/{}[]'
+    $width = [Math]::Max(1, [Console]::WindowWidth - 1)
+    $height = [Math]::Max(1, [Console]::WindowHeight - 1)
+    $columns = @()
+    for ($x = 0; $x -lt $width; $x += 2) {
+        $columns += [pscustomobject]@{
+            X = $x
+            Head = $random.Next(-$height, $height)
+            Length = $random.Next(5, 16)
+            Speed = $random.Next(1, 3)
+        }
+    }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -lt 3000) {
+        # Leave the animation cleanly if the user resizes the terminal.
+        if ([Console]::WindowWidth -le $width -or [Console]::WindowHeight -le $height) { break }
+        foreach ($column in $columns) {
+            # Erase the previous stream before advancing it.
+            for ($offset = 0; $offset -le $column.Length; $offset++) {
+                $y = $column.Head - $offset
+                if ($y -ge 0 -and $y -lt $height) {
+                    [Console]::SetCursorPosition($column.X, $y)
+                    [Console]::Write(' ')
+                }
+            }
+            $column.Head += $column.Speed
+            if ($column.Head - $column.Length -ge $height) {
+                $column.Head = $random.Next(-12, 0)
+            }
+            for ($offset = $column.Length; $offset -ge 0; $offset--) {
+                $y = $column.Head - $offset
+                if ($y -ge 0 -and $y -lt $height) {
+                    if ($offset -eq 0) { [Console]::ForegroundColor = 'White' }
+                    elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
+                    else { [Console]::ForegroundColor = 'DarkGreen' }
+                    [Console]::SetCursorPosition($column.X, $y)
+                    [Console]::Write($glyphs[$random.Next($glyphs.Length)])
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 55
+    }
+    $clock.Stop()
+    [Console]::Clear()
+    [Console]::ForegroundColor = 'Cyan'
+    $logo = @(
+        'NN   NN   000   VV     VV    AAA',
+        'NNN  NN  00 00   VV   VV    AA AA',
+        'NN N NN  00 00   VV   VV   AA   AA',
+        'NN  NNN  00 00    VV VV    AAAAAAA',
+        'NN   NN   000      VVV     AA   AA',
+        '',
+        'T O O L   H U B',
+        '',
+        'Made by N0VALID'
+    )
+    $top = [Math]::Max(0, [int](([Console]::WindowHeight - $logo.Count) / 2))
+    foreach ($line in $logo) {
+        $left = [Math]::Max(0, [int](([Console]::WindowWidth - $line.Length) / 2))
+        [Console]::SetCursorPosition($left, $top)
+        [Console]::Write($line)
+        $top++
+    }
+    Start-Sleep -Milliseconds 2200
+} finally {
+    [Console]::CursorVisible = $previousCursor
+    [Console]::ForegroundColor = $previousColor
+    [Console]::BackgroundColor = $previousBackground
+    [Console]::Clear()
+}
