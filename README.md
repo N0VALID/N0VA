@@ -1,8 +1,8 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 1.6 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `0` to close CMD.
+A Windows tool hub made by N0VALID. Version 1.7 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation stops at the first and last pages, and returning from a tool keeps the current page.
 
-## Menu
+## Page 1 - Tools and setup
 
 | Option | What it does |
 | --- | --- |
@@ -21,7 +21,19 @@ A Windows tool hub made by N0VALID. Version 1.6 includes RGB Matrix rain, a cent
 | 13 | Install RustDesk |
 | 0 | Close N0VA and CMD |
 
-Options 10, 11, and 13 use WinGet from Microsoft's App Installer. Accept installer or administrator prompts when Windows displays them. Downloads are stored in `Desktop\N0VA` (using your Windows Desktop location).
+## Page 2 - Useful downloads
+
+| Option | What it does |
+| --- | --- |
+| 14 | Install 7-Zip for archives |
+| 15 | Install Notepad++ for text editing |
+| 16 | Install Visual Studio Code |
+| 17 | Install Git |
+| 18 | Install VLC media player |
+| 19 | Install Everything file search |
+| 20 | Install Microsoft PowerToys |
+
+Options 10, 11, 13, and 14-20 use WinGet from Microsoft's App Installer. Accept installer or administrator prompts when Windows displays them. Downloads are stored in `Desktop\N0VA` (using your Windows Desktop location).
 
 The Python setup detects an existing interpreter or installs Python if needed, enables pip, and installs PyInstaller, PyAutoGUI, Pillow, and opencv-python with their dependencies. This covers EXE Compiler, Coordinate Finder, screenshots, and Command Explorer's image-confidence matching; it does not install every package on PyPI. Python's standard library and Tkinter come with the normal Windows Python installation.
 
@@ -32,7 +44,7 @@ WinUtil opens in a separate administrator PowerShell window and leaves errors vi
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.6" -o "%TEMP%\N0VA-v1.6.cmd" && "%TEMP%\N0VA-v1.6.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.7" -o "%TEMP%\N0VA-v1.7.cmd" && "%TEMP%\N0VA-v1.7.cmd"
 ```
 
 ## Adding tools
