@@ -6,7 +6,7 @@ if /i "%~1"=="--nova-fullscreen" goto nova_started
 where wt.exe >nul 2>&1
 if errorlevel 1 goto nova_started
 start "" wt.exe -w new -F new-tab --title "N0VA - Made by N0VALID" "%ComSpec%" /d /c ""%~f0" --nova-fullscreen"
-if not errorlevel 1 exit /b 0
+if not errorlevel 1 exit 0
 :nova_started
 color 0B
 
@@ -17,7 +17,6 @@ if errorlevel 1 (
     echo Startup could not finish. Please copy the error above.
     pause
 )
-set "N0VA_LAUNCHER="
 color 0B
 
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
@@ -27,29 +26,17 @@ set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 
 :menu
 cls
-echo.
-echo      NN   NN    000    VV      VV     AAA
-echo      NNN  NN   00 00    VV    VV     AA AA
-echo      NN N NN   00 00     VV  VV     AA   AA
-echo      NN  NNN   00 00      VVVV      AAAAAAA
-echo      NN   NN    000        VV       AA   AA
-echo.
-echo      T O O L   H U B                     Made by N0VALID
-echo      ==================================================================
-echo.
-echo        SETUP AND TOOLS                   WINDOWS
-echo.
-echo        [1] Install Python                [5] Chris Titus WinUtil
-echo        [2] EXE Compiler                  [6] Update Installed Apps
-echo        [3] Computer Info                 [7] Disk Cleanup
-echo        [4] Open N0VA Folder              [8] Startup Apps
-echo        [9] Command Explorer
-echo.
-echo      ==================================================================
-echo        [0] Exit                          MATRIX EDITION / v1.1
-echo.
+set "N0VA_VIEW=menu"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA startup error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+if errorlevel 1 (
+    echo N0VA - Made by N0VALID - v1.2
+    echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
+    echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
+    echo [9] Command Explorer         [0] Exit
+)
+set "N0VA_VIEW="
 set "choice="
-set /p "choice=N0VA ^> "
+set /p "choice="
 if "%choice%"=="1" goto python
 if "%choice%"=="2" goto studio
 if "%choice%"=="3" goto computer
@@ -171,11 +158,51 @@ goto menu
 
 :done
 endlocal
-exit /b 0
+exit 0
 
 # N0VA_STARTUP_PS
 # This section is read by PowerShell; cmd exits above before reaching it.
 $ErrorActionPreference = 'Stop'
+function Write-NovaCentered {
+    param([string]$Text, [ConsoleColor]$Color = 'Cyan', [switch]$NoNewline)
+    [Console]::ForegroundColor = $Color
+    $padding = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowWidth - $Text.Length) / 2))
+    $output = (' ' * $padding) + $Text
+    if ($NoNewline) { [Console]::Write($output) }
+    else { [Console]::WriteLine($output) }
+}
+if ($env:N0VA_VIEW -eq 'menu') {
+    [Console]::BackgroundColor = 'Black'
+    [Console]::Clear()
+    $rows = @(
+        @('NN   NN    000    VV      VV     AAA', 'Green'),
+        @('NNN  NN   00 00    VV    VV     AA AA', 'Green'),
+        @('NN N NN   00 00     VV  VV     AA   AA', 'Cyan'),
+        @('NN  NNN   00 00      VVVV      AAAAAAA', 'Cyan'),
+        @('NN   NN    000        VV       AA   AA', 'DarkCyan'),
+        @('', 'Black'),
+        @('T O O L   H U B', 'Green'),
+        @('Made by N0VALID', 'Magenta'),
+        @('', 'Black'),
+        @('==================================================================', 'DarkCyan'),
+        @('SETUP AND TOOLS                   WINDOWS                 ', 'Cyan'),
+        @('', 'Black'),
+        @('[1] Install Python                [5] Chris Titus WinUtil  ', 'Green'),
+        @('[2] EXE Compiler                  [6] Update Installed Apps', 'Cyan'),
+        @('[3] Computer Info                 [7] Disk Cleanup         ', 'Green'),
+        @('[4] Open N0VA Folder              [8] Startup Apps         ', 'Cyan'),
+        @('[9] Command Explorer                                      ', 'Green'),
+        @('', 'Black'),
+        @('==================================================================', 'DarkCyan'),
+        @('[0] Exit                                             v1.2', 'Magenta'),
+        @('', 'Black')
+    )
+    $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
+    for ($blank = 0; $blank -lt $top; $blank++) { [Console]::WriteLine() }
+    foreach ($row in $rows) { Write-NovaCentered -Text $row[0] -Color $row[1] }
+    Write-NovaCentered -Text 'N0VA > ' -Color Green -NoNewline
+    return
+}
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -217,6 +244,7 @@ try {
             Head = $random.Next(-$height, $height)
             Length = $random.Next(5, 16)
             Speed = $random.Next(1, 3)
+            Palette = $random.Next(0, 6)
         }
     }
     $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -240,7 +268,13 @@ try {
                 $y = $column.Head - $offset
                 if ($y -ge 0 -and $y -lt $height) {
                     if ($offset -eq 0) { [Console]::ForegroundColor = 'White' }
-                    elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
+                    elseif ($column.Palette -eq 4) {
+                        if ($offset -lt 4) { [Console]::ForegroundColor = 'Cyan' }
+                        else { [Console]::ForegroundColor = 'DarkCyan' }
+                    } elseif ($column.Palette -eq 5) {
+                        if ($offset -lt 4) { [Console]::ForegroundColor = 'Magenta' }
+                        else { [Console]::ForegroundColor = 'DarkMagenta' }
+                    } elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
                     else { [Console]::ForegroundColor = 'DarkGreen' }
                     [Console]::SetCursorPosition($column.X, $y)
                     [Console]::Write($glyphs[$random.Next($glyphs.Length)])
