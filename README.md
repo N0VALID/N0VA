@@ -1,6 +1,6 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 1.7 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation stops at the first and last pages, and returning from a tool keeps the current page.
+A Windows tool hub made by N0VALID. Version 1.8 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation uses the same running menu process and cached frames to avoid a blank screen between pages. It stops at the first and last pages, and returning from a tool keeps the current page.
 
 ## Page 1 - Tools and setup
 
@@ -44,7 +44,7 @@ WinUtil opens in a separate administrator PowerShell window and leaves errors vi
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.7" -o "%TEMP%\N0VA-v1.7.cmd" && "%TEMP%\N0VA-v1.7.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.8" -o "%TEMP%\N0VA-v1.8.cmd" && "%TEMP%\N0VA-v1.8.cmd"
 ```
 
 ## Adding tools
