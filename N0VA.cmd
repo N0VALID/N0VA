@@ -1,11 +1,22 @@
 @echo off
 setlocal EnableExtensions
-title N0VA
+title N0VA - Made by N0VALID
+rem Windows Terminal owns fullscreen itself; launch it explicitly in fullscreen.
+if /i "%~1"=="--nova-fullscreen" goto nova_started
+where wt.exe >nul 2>&1
+if errorlevel 1 goto nova_started
+start "" wt.exe -w new -F new-tab --title "N0VA - Made by N0VALID" "%ComSpec%" /d /c ""%~f0" --nova-fullscreen"
+if not errorlevel 1 exit /b 0
+:nova_started
 color 0B
 
 rem Run the embedded startup once, before entering the tool menu.
 set "N0VA_LAUNCHER=%~f0"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { }" 2>nul
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA startup error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+if errorlevel 1 (
+    echo Startup could not finish. Please copy the error above.
+    pause
+)
 set "N0VA_LAUNCHER="
 color 0B
 
@@ -17,24 +28,25 @@ set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 :menu
 cls
 echo.
-echo  ========================================
-echo               N 0 V A
-echo                TOOL HUB
-echo           Made by N0VALID
-echo  ========================================
+echo      NN   NN    000    VV      VV     AAA
+echo      NNN  NN   00 00    VV    VV     AA AA
+echo      NN N NN   00 00     VV  VV     AA   AA
+echo      NN  NNN   00 00      VVVV      AAAAAAA
+echo      NN   NN    000        VV       AA   AA
 echo.
-echo   [1] Install Python
-echo   [2] Get EXE Compiler
-echo   [3] Computer Info
-echo   [4] Open N0VA Folder
-echo   [5] Chris Titus Tech WinUtil
-echo   [6] Update Installed Apps
-echo   [7] Disk Cleanup
-echo   [8] Startup Apps
-echo   [9] Command Explorer
-echo   [0] Exit
+echo      T O O L   H U B                     Made by N0VALID
+echo      ==================================================================
 echo.
-echo  ========================================
+echo        SETUP AND TOOLS                   WINDOWS
+echo.
+echo        [1] Install Python                [5] Chris Titus WinUtil
+echo        [2] EXE Compiler                  [6] Update Installed Apps
+echo        [3] Computer Info                 [7] Disk Cleanup
+echo        [4] Open N0VA Folder              [8] Startup Apps
+echo        [9] Command Explorer
+echo.
+echo      ==================================================================
+echo        [0] Exit                          MATRIX EDITION / v1.1
 echo.
 set "choice="
 set /p "choice=N0VA ^> "
@@ -186,7 +198,8 @@ public static class N0VAWindow {
 } catch { }
 $previousColor = [Console]::ForegroundColor
 $previousBackground = [Console]::BackgroundColor
-$previousCursor = [Console]::CursorVisible
+$previousCursor = $true
+try { $previousCursor = [Console]::CursorVisible } catch { }
 try {
     [Console]::BackgroundColor = 'Black'
     [Console]::ForegroundColor = 'Cyan'
