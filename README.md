@@ -2,7 +2,7 @@
 
 A simple tool hub for Windows.
 
-N0VA opens with a centered logo and **Made by N0VALID** credit, then shows the tool menu. Startup requests full-screen console mode; hosts that do not support it fall back to maximizing the console window. Windows Terminal may keep its own window mode; press **Alt+Enter** there for full screen. The intro runs once per launch and does not require Python.
+N0VA opens with three seconds of green Matrix-style falling code, followed by a centered logo and **Made by N0VALID** credit, then shows the tool menu. Startup requests full-screen console mode; hosts that do not support it fall back to maximizing the console window. Windows Terminal may keep its own window mode; press **Alt+Enter** there for full screen. The intro runs once per launch and does not require Python.
 
 ## Menu
 
