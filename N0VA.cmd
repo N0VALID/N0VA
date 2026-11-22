@@ -29,7 +29,7 @@ cls
 set "N0VA_VIEW=menu"
 powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA startup error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 if errorlevel 1 (
-    echo N0VA - Made by N0VALID - v1.2
+    echo N0VA - Made by N0VALID - v1.3
     echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
     echo [9] Command Explorer         [0] Exit
@@ -163,11 +163,50 @@ exit 0
 # N0VA_STARTUP_PS
 # This section is read by PowerShell; cmd exits above before reaching it.
 $ErrorActionPreference = 'Stop'
+# Enable ANSI true color in Windows console hosts as well as Windows Terminal.
+$script:NovaTrueColor = ($env:TERM -match 'xterm|screen|vt100')
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class NovaVT {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+'@
+    $mode = [uint32]0
+    $handle = [NovaVT]::GetStdHandle(-11)
+    if ([NovaVT]::GetConsoleMode($handle, [ref]$mode)) {
+        $script:NovaTrueColor = [NovaVT]::SetConsoleMode($handle, ($mode -bor 4))
+    }
+} catch { }
+$script:NovaEscape = [string][char]27
+function Get-NovaInk {
+    param([double]$Phase, [double]$Brightness = 1)
+    $r = [int]((140 + 115 * [Math]::Sin($Phase)) * $Brightness)
+    $g = [int]((140 + 115 * [Math]::Sin($Phase + 2.0944)) * $Brightness)
+    $b = [int]((140 + 115 * [Math]::Sin($Phase + 4.1888)) * $Brightness)
+    return "$($script:NovaEscape)[38;2;$r;$g;${b}m"
+}
+function Get-NovaRainbow {
+    param([string]$Text, [double]$Phase = 0)
+    if (-not $script:NovaTrueColor) { return $Text }
+    $builder = New-Object Text.StringBuilder
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        [void]$builder.Append((Get-NovaInk -Phase ($Phase + $i * 0.18)))
+        [void]$builder.Append($Text[$i])
+    }
+    [void]$builder.Append("$($script:NovaEscape)[0m")
+    return $builder.ToString()
+}
 function Write-NovaCentered {
-    param([string]$Text, [ConsoleColor]$Color = 'Cyan', [switch]$NoNewline)
+    param([string]$Text, [ConsoleColor]$Color = 'Cyan', [switch]$NoNewline, [switch]$Rainbow, [double]$Phase = 0)
     [Console]::ForegroundColor = $Color
     $padding = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowWidth - $Text.Length) / 2))
-    $output = (' ' * $padding) + $Text
+    $painted = $Text
+    if ($Rainbow) { $painted = Get-NovaRainbow -Text $Text -Phase $Phase }
+    $output = (' ' * $padding) + $painted
     if ($NoNewline) { [Console]::Write($output) }
     else { [Console]::WriteLine($output) }
 }
@@ -194,12 +233,16 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[9] Command Explorer                                      ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.2', 'Magenta'),
+        @('[0] Exit                                             v1.3', 'Magenta'),
         @('', 'Black')
     )
     $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
     for ($blank = 0; $blank -lt $top; $blank++) { [Console]::WriteLine() }
-    foreach ($row in $rows) { Write-NovaCentered -Text $row[0] -Color $row[1] }
+    $rowIndex = 0
+    foreach ($row in $rows) {
+        Write-NovaCentered -Text $row[0] -Color $row[1] -Rainbow -Phase ($rowIndex * 0.28)
+        $rowIndex++
+    }
     Write-NovaCentered -Text 'N0VA > ' -Color Green -NoNewline
     return
 }
@@ -277,7 +320,12 @@ try {
                     } elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
                     else { [Console]::ForegroundColor = 'DarkGreen' }
                     [Console]::SetCursorPosition($column.X, $y)
-                    [Console]::Write($glyphs[$random.Next($glyphs.Length)])
+                    $glyph = [string]$glyphs[$random.Next($glyphs.Length)]
+                    if ($script:NovaTrueColor -and $offset -gt 0) {
+                        $phase = $column.X * 0.07 + $clock.ElapsedMilliseconds / 700.0 + $offset * 0.09
+                        $brightness = [Math]::Max(0.12, 1.0 - $offset / [double]($column.Length + 1))
+                        [Console]::Write((Get-NovaInk -Phase $phase -Brightness $brightness) + $glyph + "$($script:NovaEscape)[0m")
+                    } else { [Console]::Write($glyph) }
                 }
             }
         }
@@ -299,9 +347,8 @@ try {
     )
     $top = [Math]::Max(0, [int](([Console]::WindowHeight - $logo.Count) / 2))
     foreach ($line in $logo) {
-        $left = [Math]::Max(0, [int](([Console]::WindowWidth - $line.Length) / 2))
-        [Console]::SetCursorPosition($left, $top)
-        [Console]::Write($line)
+        [Console]::SetCursorPosition(0, $top)
+        Write-NovaCentered -Text $line -Rainbow -Phase ($top * 0.28)
         $top++
     }
     Start-Sleep -Milliseconds 2200
