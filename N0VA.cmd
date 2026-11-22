@@ -12,7 +12,7 @@ color 0B
 
 rem Run the embedded startup once, before entering the tool menu.
 set "N0VA_LAUNCHER=%~f0"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA startup error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 if errorlevel 1 (
     echo Startup could not finish. Please copy the error above.
     pause
@@ -27,12 +27,13 @@ set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 :menu
 cls
 set "N0VA_VIEW=menu"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA startup error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 if errorlevel 1 (
-    echo N0VA - Made by N0VALID - v1.3
+    echo N0VA - Made by N0VALID - v1.4
     echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
-    echo [9] Command Explorer         [0] Exit
+    echo [9] Command Explorer  [10] Install Brave  [11] Install Steam
+    echo [12] All Python dependencies  [13] Install everything  [0] Exit
 )
 set "N0VA_VIEW="
 set "choice="
@@ -46,6 +47,10 @@ if "%choice%"=="6" goto updates
 if "%choice%"=="7" goto cleanup
 if "%choice%"=="8" goto startup
 if "%choice%"=="9" goto explorer
+if "%choice%"=="10" goto brave
+if "%choice%"=="11" goto steam
+if "%choice%"=="12" goto dependencies
+if "%choice%"=="13" goto install_all
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -79,9 +84,69 @@ if errorlevel 1 goto failed
 goto complete_download
 
 :winutil
-powershell.exe -NoProfile -Command "irm 'https://christitus.com/win' | iex" >nul 2>&1
-if errorlevel 1 goto failed
-goto complete
+cls
+echo Downloading Chris Titus WinUtil. Accept the Windows administrator prompt.
+set "N0VA_VIEW=winutil"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+set "N0VA_VIEW="
+rem Keep download errors and UAC cancellation visible before returning.
+pause
+goto menu
+
+:brave
+cls
+call :install_app "Brave.Brave"
+pause
+goto menu
+
+:steam
+cls
+call :install_app "Valve.Steam"
+pause
+goto menu
+
+:install_app
+where winget.exe >nul 2>&1
+if errorlevel 1 (
+    echo WinGet is missing. Install or update App Installer from Microsoft Store.
+    exit /b 1
+)
+winget.exe install --id "%~1" --exact --source winget --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
+    echo Installation did not finish successfully. See the WinGet message above.
+    exit /b 1
+)
+echo Installation complete.
+exit /b 0
+
+:dependencies
+cls
+echo Installing Python dependencies for all N0VA tools...
+set "N0VA_VIEW=dependencies"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+set "N0VA_VIEW="
+pause
+goto menu
+
+
+:install_all
+cls
+set "N0VA_SETUP_FAILED="
+call :install_app "Brave.Brave"
+if errorlevel 1 set "N0VA_SETUP_FAILED=1"
+call :install_app "Valve.Steam"
+if errorlevel 1 set "N0VA_SETUP_FAILED=1"
+set "N0VA_VIEW=dependencies"
+powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
+if errorlevel 1 set "N0VA_SETUP_FAILED=1"
+set "N0VA_VIEW="
+if defined N0VA_SETUP_FAILED (
+    echo Some installations failed. Check the messages above before retrying.
+) else (
+    echo Brave, Steam, and all N0VA Python dependencies are ready.
+)
+pause
+goto menu
 
 :updates
 cls
@@ -163,6 +228,64 @@ exit 0
 # N0VA_STARTUP_PS
 # This section is read by PowerShell; cmd exits above before reaching it.
 $ErrorActionPreference = 'Stop'
+if ($env:N0VA_VIEW -eq 'winutil') {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    [void][IO.Directory]::CreateDirectory($env:INSTALL_DIR)
+    $cttPath = Join-Path $env:INSTALL_DIR 'WinUtil.ps1'
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://christitus.com/win' -OutFile $cttPath
+    if ((Get-Item -LiteralPath $cttPath).Length -eq 0) { throw 'WinUtil download was empty. Try again.' }
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', ('"{0}"' -f $cttPath))
+    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -PassThru -ErrorAction Stop
+    Write-Host ('WinUtil opened in an administrator PowerShell window (process {0}).' -f $process.Id) -ForegroundColor Green
+    Write-Host 'If WinUtil cannot start, its error will stay visible in that window.'
+    return
+}
+if ($env:N0VA_VIEW -eq 'dependencies') {
+    function Find-NovaPython {
+        foreach ($name in @('py.exe', 'python.exe')) {
+            $command = Get-Command $name -ErrorAction SilentlyContinue
+            if (-not $command) { continue }
+            if ($command.Source -like '*\Microsoft\WindowsApps\python.exe') { continue }
+            $arguments = @('-c', 'import sys; print(sys.executable)')
+            if ($name -eq 'py.exe') { $arguments = @('-3') + $arguments }
+            try { $result = & $command.Source @arguments 2>$null } catch { continue }
+            if ($LASTEXITCODE -eq 0 -and $result -and (Test-Path -LiteralPath ([string]($result | Select-Object -Last 1)))) {
+                return [string]($result | Select-Object -Last 1)
+            }
+        }
+        # Also find Python installed in this session, before PATH refreshes.
+        $roots = @((Join-Path $env:LOCALAPPDATA 'Programs\Python'), $env:ProgramFiles)
+        foreach ($root in $roots) {
+            if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
+            foreach ($folder in (Get-ChildItem -LiteralPath $root -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+                $candidate = Join-Path $folder.FullName 'python.exe'
+                if (Test-Path -LiteralPath $candidate) { return $candidate }
+            }
+        }
+        return $null
+    }
+    $python = Find-NovaPython
+    if (-not $python) {
+        Write-Host 'Python was not found. Installing Python first...'
+        $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+        if (-not $winget) { throw 'WinGet is missing. Install App Installer from Microsoft Store, then retry.' }
+        & $winget.Source install --id Python.Python.3.14 --exact --source winget --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) { throw 'Python installation failed. See the WinGet message above.' }
+        $python = Find-NovaPython
+        if (-not $python) { throw 'Python was installed but could not be found. Reopen N0VA and select option 12 again.' }
+    }
+    Write-Host ('Using Python: ' + $python) -ForegroundColor Cyan
+    & $python -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) { throw 'Could not enable pip for this Python installation.' }
+    & $python -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw 'Updating pip failed. Check the error above and retry.' }
+    & $python -m pip install --upgrade pyinstaller pyautogui pillow opencv-python
+    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check the pip error above and retry.' }
+    & $python -m pip check
+    if ($LASTEXITCODE -ne 0) { throw 'pip found a package conflict. See the details above.' }
+    Write-Host 'All N0VA Python dependencies installed successfully.' -ForegroundColor Green
+    return
+}
 # Enable ANSI true color in Windows console hosts as well as Windows Terminal.
 $script:NovaTrueColor = ($env:TERM -match 'xterm|screen|vt100')
 try {
@@ -230,10 +353,12 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[2] EXE Compiler                  [6] Update Installed Apps', 'Cyan'),
         @('[3] Computer Info                 [7] Disk Cleanup         ', 'Green'),
         @('[4] Open N0VA Folder              [8] Startup Apps         ', 'Cyan'),
-        @('[9] Command Explorer                                      ', 'Green'),
+        @('[9] Command Explorer             [10] Install Brave       ', 'Green'),
+        @('[11] Install Steam               [12] All Python packages ', 'Cyan'),
+        @('[13] Install everything: Brave, Steam + Python packages   ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.3', 'Magenta'),
+        @('[0] Exit                                             v1.4', 'Magenta'),
         @('', 'Black')
     )
     $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
