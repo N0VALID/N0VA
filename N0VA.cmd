@@ -192,6 +192,53 @@ try {
     [Console]::ForegroundColor = 'Cyan'
     [Console]::CursorVisible = $false
     [Console]::Clear()
+    # Independent falling streams, with bright heads and dark green tails.
+    $random = New-Object System.Random
+    $glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:<>/{}[]'
+    $width = [Math]::Max(1, [Console]::WindowWidth - 1)
+    $height = [Math]::Max(1, [Console]::WindowHeight - 1)
+    $columns = @()
+    for ($x = 0; $x -lt $width; $x += 2) {
+        $columns += [pscustomobject]@{
+            X = $x
+            Head = $random.Next(-$height, $height)
+            Length = $random.Next(5, 16)
+            Speed = $random.Next(1, 3)
+        }
+    }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -lt 3000) {
+        # Leave the animation cleanly if the user resizes the terminal.
+        if ([Console]::WindowWidth -le $width -or [Console]::WindowHeight -le $height) { break }
+        foreach ($column in $columns) {
+            # Erase the previous stream before advancing it.
+            for ($offset = 0; $offset -le $column.Length; $offset++) {
+                $y = $column.Head - $offset
+                if ($y -ge 0 -and $y -lt $height) {
+                    [Console]::SetCursorPosition($column.X, $y)
+                    [Console]::Write(' ')
+                }
+            }
+            $column.Head += $column.Speed
+            if ($column.Head - $column.Length -ge $height) {
+                $column.Head = $random.Next(-12, 0)
+            }
+            for ($offset = $column.Length; $offset -ge 0; $offset--) {
+                $y = $column.Head - $offset
+                if ($y -ge 0 -and $y -lt $height) {
+                    if ($offset -eq 0) { [Console]::ForegroundColor = 'White' }
+                    elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
+                    else { [Console]::ForegroundColor = 'DarkGreen' }
+                    [Console]::SetCursorPosition($column.X, $y)
+                    [Console]::Write($glyphs[$random.Next($glyphs.Length)])
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 55
+    }
+    $clock.Stop()
+    [Console]::Clear()
+    [Console]::ForegroundColor = 'Cyan'
     $logo = @(
         'NN   NN   000   VV     VV    AAA',
         'NNN  NN  00 00   VV   VV    AA AA',
