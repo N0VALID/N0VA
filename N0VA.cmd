@@ -26,7 +26,6 @@ set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 set "N0VA_PAGE=1"
 
 :menu
-cls
 set "N0VA_VIEW=menu"
 powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 250 }"
 set "choice=%errorlevel%"
@@ -37,7 +36,7 @@ if "%choice%"=="100" goto previous_page
 goto dispatch
 
 :menu_fallback
-echo N0VA - Made by N0VALID - v1.7 - Page %N0VA_PAGE% of 2
+echo N0VA - Made by N0VALID - v1.8 - Page %N0VA_PAGE% of 2
 if "%N0VA_PAGE%"=="1" (
     echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
@@ -54,6 +53,9 @@ if /i "%choice%"=="d" goto next_page
 if /i "%choice%"=="a" goto previous_page
 
 :dispatch
+rem Remember the page selected inside the persistent PowerShell menu.
+if %choice% GEQ 14 if %choice% LEQ 20 set "N0VA_PAGE=2"
+if %choice% GEQ 1 if %choice% LEQ 13 set "N0VA_PAGE=1"
 if "%choice%"=="1" goto python
 if "%choice%"=="2" goto studio
 if "%choice%"=="3" goto computer
@@ -429,11 +431,29 @@ function Read-NovaMenuChoice {
         }
     }
 }
-if ($env:N0VA_VIEW -eq 'menu') {
-    $page = 1
-    if ($env:N0VA_PAGE -eq '2') { $page = 2 }
-    [Console]::BackgroundColor = 'Black'
-    [Console]::Clear()
+function New-NovaMenuFrame {
+    param($Rows, [int]$Width, [int]$Height)
+    $top = [Math]::Max(0, [int][Math]::Floor(($Height - $Rows.Count - 1) / 2))
+    $frame = New-Object Text.StringBuilder
+    $prompt = 'N0VA > '
+    $promptY = [Math]::Min($Height - 1, $top + $Rows.Count)
+    $promptX = [Math]::Max(0, [int][Math]::Floor(($Width - $prompt.Length) / 2))
+    for ($y = 0; $y -lt $Height; $y++) {
+        $text = ''
+        $index = $y - $top
+        if ($index -ge 0 -and $index -lt $Rows.Count) { $text = [string]$Rows[$index][0] }
+        if ($y -eq $promptY) { $text = $prompt }
+        if ($text.Length -gt $Width - 1) { $text = $text.Substring(0, [Math]::Max(0, $Width - 1)) }
+        $left = [Math]::Max(0, [int][Math]::Floor(($Width - $text.Length) / 2))
+        $right = [Math]::Max(0, $Width - 1 - $left - $text.Length)
+        $painted = Get-NovaRainbow -Text $text -Phase ($index * 0.28)
+        [void]$frame.Append((' ' * $left) + $painted + (' ' * $right))
+        if ($y -lt $Height - 1) { [void]$frame.Append("`r`n") }
+    }
+    return [pscustomobject]@{ Text = $frame.ToString(); PromptX = $promptX + $prompt.Length; PromptY = $promptY }
+}
+function Get-NovaMenuRows {
+    param([int]$Page)
     $rows = @(
         @('NN   NN    000    VV      VV     AAA', 'Green'),
         @('NNN  NN   00 00    VV    VV     AA AA', 'Green'),
@@ -456,7 +476,7 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[13] Install RustDesk                                     ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.7', 'Magenta'),
+        @('[0] Exit                                             v1.8', 'Magenta'),
         @('[A] Previous page                       [D] Next page', 'Cyan')
     )
     if ($page -eq 2) {
@@ -471,16 +491,40 @@ if ($env:N0VA_VIEW -eq 'menu') {
         $rows[17] = @('', 'Black')
         $rows[18] = @('', 'Black')
     }
-    $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
-    for ($blank = 0; $blank -lt $top; $blank++) { [Console]::WriteLine() }
-    $rowIndex = 0
-    foreach ($row in $rows) {
-        Write-NovaCentered -Text $row[0] -Color $row[1] -Rainbow -Phase ($rowIndex * 0.28)
-        $rowIndex++
-    }
-    Write-NovaCentered -Text 'N0VA > ' -Color Green -NoNewline
-    exit (Read-NovaMenuChoice -Page $page)
+    return ,$rows
 }
+if ($env:N0VA_VIEW -eq 'menu') {
+    $page = 1
+    if ($env:N0VA_PAGE -eq '2') { $page = 2 }
+    [Console]::BackgroundColor = 'Black'
+    $frames = @{}
+    while ($true) {
+    $rows = Get-NovaMenuRows -Page $page
+    $width = [Console]::WindowWidth
+    $height = [Console]::WindowHeight
+    $cacheKey = '{0}:{1}:{2}' -f $page, $width, $height
+    if (-not $frames.ContainsKey($cacheKey)) {
+        # Prepare both pages before waiting for input, so every switch is cached.
+        foreach ($framePage in 1, 2) {
+            $key = '{0}:{1}:{2}' -f $framePage, $width, $height
+            $frames[$key] = New-NovaMenuFrame -Rows (Get-NovaMenuRows -Page $framePage) -Width $width -Height $height
+        }
+    }
+    $frame = $frames[$cacheKey]
+    # Paint a completed frame over the old one; never clear between pages.
+    try {
+        [Console]::CursorVisible = $false
+        [Console]::SetCursorPosition(0, [Console]::WindowTop)
+        [Console]::Write($frame.Text)
+        [Console]::SetCursorPosition($frame.PromptX, [Console]::WindowTop + $frame.PromptY)
+    } finally { [Console]::CursorVisible = $true }
+    $selection = Read-NovaMenuChoice -Page $page
+    if ($selection -eq 101) { $page = 2; continue }
+    if ($selection -eq 100) { $page = 1; continue }
+    exit $selection
+    }
+}
+
 try {
     Add-Type -TypeDefinition @'
 using System;
