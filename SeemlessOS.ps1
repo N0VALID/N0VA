@@ -1,3 +1,4 @@
+# N0VA desktop build: 2.0
 # Seemless 0S MODE - N0VA's keyboard-driven terminal desktop.
 # Windows PowerShell 5.1+, no third-party modules required.
 [CmdletBinding()]
@@ -78,21 +79,9 @@ $script:SeemlessApps = @(
     @{Name='ShareX';Id='ShareX.ShareX';Category='Capture';Detail='Screenshots and screen recording'},
     @{Name='OBS Studio';Id='OBSProject.OBSStudio';Category='Capture';Detail='Video recording and streaming'}
 )
-$script:SeemlessControls = @(
-    @{Name='Windows Settings';Target='ms-settings:';Detail='Open the full Windows Settings app'},
-    @{Name='Installed apps';Target='ms-settings:appsfeatures';Detail='Manage or uninstall installed apps'},
-    @{Name='Windows Update';Target='ms-settings:windowsupdate';Detail='Check for Windows updates'},
-    @{Name='Network & Internet';Target='ms-settings:network';Detail='Wi-Fi, Ethernet and connectivity'},
-    @{Name='Display';Target='ms-settings:display';Detail='Resolution, scale and monitors'},
-    @{Name='Sound';Target='ms-settings:sound';Detail='Playback and recording devices'},
-    @{Name='Storage';Target='ms-settings:storagesense';Detail='Storage usage and cleanup settings'},
-    @{Name='Startup apps';Target='ms-settings:startupapps';Detail='Choose what opens when Windows starts'},
-    @{Name='System information';Target='msinfo32.exe';Detail='Hardware and Windows information'},
-    @{Name='Task Manager';Target='taskmgr.exe';Detail='View running apps and resource use'}
-)
 $script:SeemlessState = @{
     View='Desktop'; DesktopIndex=0; StartIndex=0; FileIndex=0; AppIndex=0; ControlIndex=0
-    Path=[Environment]::GetFolderPath('UserProfile'); Files=@(); AppQuery=''; Status='Ready. Press S for Start, or use F1-F5.'
+    Path=[Environment]::GetFolderPath('UserProfile'); Files=@(); AppQuery=''; Status='Choose an item with the arrows and Enter. S opens Start.'
     Browser=$null; BrowserScroll=0; LinkIndex=0; LinkFocus=$false; History=(New-Object 'System.Collections.Generic.List[object]')
     Modal=$null; Prompt=$null; Running=$true; Width=120; Height=40; Ansi=$false
 }
@@ -144,8 +133,9 @@ function Update-SeemlessFiles {
 function Open-SeemlessView {
     param([string]$View)
     $script:SeemlessState.View=$View
-    if($View -eq 'Explorer'){Update-SeemlessFiles}
-    Set-SeemlessStatus ('{0}  |  Esc: Desktop  F10: N0VA' -f $View)
+    if($View -eq 'Explorer'){Update-SeemlessFiles;return}
+    $welcome=@{Desktop='Welcome home. Your files, apps and settings are right here.';Start='Choose what you would like to do.';Apps='Find an app, then select it to get started.';Control='Settings and information, without leaving your desktop.';Web='Read pages, follow links, or search the web.'}
+    if($welcome.ContainsKey($View)){Set-SeemlessStatus $welcome[$View]}
 }
 function Get-SeemlessPage {
     param([string]$Address)
@@ -206,22 +196,223 @@ function Start-SeemlessExternal {
     try { Start-Process -FilePath $Target -ErrorAction Stop | Out-Null;Set-SeemlessStatus ('Opened '+$Target) }
     catch { Set-SeemlessStatus ('Could not open: '+$_.Exception.Message) }
 }
-function Install-SeemlessApp {
-    param($App)
-    try {
-        [Console]::CursorVisible=$true
-        [Console]::ResetColor();[Console]::Clear()
-        Write-Host ('N0VA App Center - Installing '+$App.Name) -ForegroundColor Cyan
-        Write-Host ('Package: '+$App.Id+"`n")
-        $winget=Get-Command winget.exe -ErrorAction SilentlyContinue
-        if(-not $winget){throw 'WinGet is missing. Install or update App Installer from Microsoft Store.'}
-        & $winget.Source install --id $App.Id --exact --source winget --accept-package-agreements --accept-source-agreements
-        if($LASTEXITCODE -ne 0){throw ('WinGet did not complete successfully (exit '+$LASTEXITCODE+'). Read its message above.')}
-        Set-SeemlessStatus ($App.Name+' installation completed.')
-        Write-Host "`nInstallation complete." -ForegroundColor Green
-    }catch {Set-SeemlessStatus $_.Exception.Message;Write-Host ("`n"+$_.Exception.Message) -ForegroundColor Yellow}
-    finally {Write-Host "`nPress any key to return to App Center...";[void][Console]::ReadKey($true)}
+# An installer runs without stealing the desktop or a PowerShell runspace.
+if(-not ('SeemlessInstallJob' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+public sealed class SeemlessInstallJob : IDisposable {
+    private readonly Process process;
+    private readonly Queue<string> lines=new Queue<string>();
+    private readonly object gate=new object();
+    public SeemlessInstallJob(string executable,string package) {
+        process=new Process();
+        process.StartInfo=new ProcessStartInfo(executable,"install --id "+package+" --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity");
+        process.StartInfo.UseShellExecute=false;process.StartInfo.CreateNoWindow=true;
+        process.StartInfo.RedirectStandardOutput=true;process.StartInfo.RedirectStandardError=true;
+        process.OutputDataReceived+=Receive;process.ErrorDataReceived+=Receive;
+        if(!process.Start())throw new InvalidOperationException("The installer could not start.");
+        process.BeginOutputReadLine();process.BeginErrorReadLine();
+    }
+    private void Receive(object sender,DataReceivedEventArgs e) {
+        if(String.IsNullOrWhiteSpace(e.Data))return;
+        lock(gate){lines.Enqueue(e.Data);while(lines.Count>160)lines.Dequeue();}
+    }
+    public bool Running {get{return !process.HasExited;}}
+    public int ExitCode {get{process.WaitForExit();return process.ExitCode;}}
+    public string[] Snapshot(){lock(gate){return lines.ToArray();}}
+    public void Dispose(){process.Dispose();}
 }
+'@
+}
+$script:SeemlessState.Document=$null
+$script:SeemlessState.Preview=$null
+$script:SeemlessState.InstallJob=$null
+$script:SeemlessState.InstallApp=$null
+$script:SeemlessState.InstallResult=''
+$script:SeemlessState.InstallLog=@()
+$script:SeemlessState.SettingsCache=@{}
+$script:SeemlessState.SettingsScroll=0
+$script:SeemlessState.Theme='Ocean'
+$script:SeemlessControls=@(@{Name='This PC'},@{Name='Storage'},@{Name='Network'},@{Name='Running apps'},@{Name='Appearance'})
+function Set-SeemlessTheme {
+    param([string]$Name,[switch]$Save)
+    switch($Name){
+        'Emerald' {$script:SC.Accent=0x6CE8AD;$script:SC.Blue=0x157951;$script:SC.Desktop=0x081F1D;$script:SC.Select=0x205747}
+        'Violet' {$script:SC.Accent=0xC7A8FF;$script:SC.Blue=0x7051B8;$script:SC.Desktop=0x18182E;$script:SC.Select=0x493878}
+        default {$Name='Ocean';$script:SC.Accent=0x55C8FF;$script:SC.Blue=0x1675DF;$script:SC.Desktop=0x061A36;$script:SC.Select=0x174E7A}
+    }
+    $script:SeemlessState.Theme=$Name
+    if($Save){
+        try{[void][IO.Directory]::CreateDirectory($InstallDir);@{Theme=$Name}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $InstallDir 'seemless-settings.json') -Encoding UTF8;Set-SeemlessStatus ('Appearance saved: '+$Name)}
+        catch{Set-SeemlessStatus ('Could not save appearance: '+$_.Exception.Message)}
+    }
+}
+try{$prefs=Get-Content -LiteralPath (Join-Path $InstallDir 'seemless-settings.json') -Raw -ErrorAction Stop|ConvertFrom-Json;Set-SeemlessTheme $prefs.Theme}catch{}
+function Get-SeemlessSettingLines {
+    param([string]$Category)
+    $cache=$script:SeemlessState.SettingsCache
+    if($cache.ContainsKey($Category) -and ((Get-Date)-$cache[$Category].At).TotalSeconds -lt 30){return $cache[$Category].Lines}
+    $lines=New-Object 'System.Collections.Generic.List[string]'
+    try{
+        switch($Category){
+            'This PC' {
+                $lines.Add('Device: '+[Environment]::MachineName);$lines.Add('Signed in: '+[Environment]::UserName)
+                $lines.Add('System: '+[Environment]::OSVersion.VersionString);$lines.Add('Processors: '+[Environment]::ProcessorCount)
+                $lines.Add('64-bit system: '+$(if([Environment]::Is64BitOperatingSystem){'Yes'}else{'No'}));$lines.Add('Home: '+[Environment]::GetFolderPath('UserProfile'))
+                $lines.Add('N0VA files: '+$InstallDir)
+            }
+            'Storage' {
+                foreach($drive in [IO.DriveInfo]::GetDrives()){
+                    try{if($drive.IsReady){$lines.Add(('{0}  {1:N1} GB free / {2:N1} GB  [{3}]' -f $drive.Name,($drive.AvailableFreeSpace/1GB),($drive.TotalSize/1GB),$drive.DriveFormat))}}catch{}
+                }
+            }
+            'Network' {
+                foreach($adapter in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()){
+                    if($adapter.OperationalStatus -ne 'Up'){continue}
+                    $lines.Add($adapter.Name+'  -  Connected')
+                    foreach($address in $adapter.GetIPProperties().UnicastAddresses){if($address.Address.AddressFamily -eq 'InterNetwork'){$lines.Add('  IPv4: '+$address.Address)}}
+                }
+            }
+            'Running apps' {
+                $lines.Add('APP                           MEMORY')
+                foreach($process in (Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 30)){$lines.Add(('{0,-28} {1,7:N0} MB' -f $process.ProcessName,($process.WorkingSet64/1MB)))}
+            }
+            'Appearance' {$lines.Add('Choose the look of your desktop.');$lines.Add('');$lines.Add('Current theme: '+$script:SeemlessState.Theme);$lines.Add('');$lines.Add('Enter changes theme: Ocean / Emerald / Violet');$lines.Add('Your choice is saved automatically.')}
+        }
+        if(-not $lines.Count){$lines.Add('No information available on this PC.')}
+    }catch{$lines.Add('Some details are unavailable: '+$_.Exception.Message)}
+    $cache[$Category]=@{At=(Get-Date);Lines=$lines.ToArray()};return $lines.ToArray()
+}
+function Open-SeemlessFile {
+    param([string]$Path)
+    $item=Get-Item -LiteralPath $Path -ErrorAction Stop
+    $info=@('Name: '+$item.Name,'Size: '+('{0:N0} bytes' -f $item.Length),'Changed: '+$item.LastWriteTime.ToString('g'),'Location: '+$item.DirectoryName)
+    $preview=@{Path=$item.FullName;Name=$item.Name;Editable=$false;Text='';Lines=$info;Scroll=0}
+    if($item.Length -gt 512KB){$preview.Lines=$info+@('','This file is too large for the built-in reader.','Press O to open it in its Windows app.')}
+    else{
+        $bytes=[IO.File]::ReadAllBytes($item.FullName)
+        $isText=($bytes -notcontains [byte]0) -or ($bytes.Length -ge 2 -and (($bytes[0] -eq 255 -and $bytes[1] -eq 254) -or ($bytes[0] -eq 254 -and $bytes[1] -eq 255)))
+        if($isText -and -not ($bytes.Length -ge 2 -and (($bytes[0] -eq 255 -and $bytes[1] -eq 254) -or ($bytes[0] -eq 254 -and $bytes[1] -eq 255)))){
+            try{$decoded=(New-Object Text.UTF8Encoding($false,$true)).GetString($bytes);if($decoded -match '[\x00-\x08\x0B\x0C\x0E-\x1F]'){$isText=$false}}catch{$isText=$false}
+        }
+        if($isText){
+            $reader=New-Object IO.StreamReader($item.FullName,$true)
+            try{$text=$reader.ReadToEnd();$encoding=$reader.CurrentEncoding}finally{$reader.Dispose()}
+            $preview.Text=$text;$preview.Encoding=$encoding;$preview.Editable=($item.Length -le 256KB -and -not $item.IsReadOnly)
+            $preview.Lines=@(Get-SeemlessLines $text ([Math]::Max(10,$script:SeemlessState.Width-10)))
+            if(-not $preview.Editable){$preview.Lines=@('Read-only preview (file is read-only or larger than 256 KB).','')+$preview.Lines}
+            $preview.LastWrite=$item.LastWriteTimeUtc.Ticks
+        }else{
+            $preview.Lines=$info+@('','This file uses a format the desktop cannot edit.','Press O to open it in its Windows app.')
+            if($item.Extension -match '^\.(png|jpe?g|gif|bmp|ico)$'){
+                try{Add-Type -AssemblyName System.Drawing;$image=[Drawing.Image]::FromFile($item.FullName);try{$preview.Lines=$info+@('','Image: '+$image.Width+' x '+$image.Height+' pixels','Press O to view in your Windows photo app.')}finally{$image.Dispose()}}catch{}
+            }
+        }
+    }
+    $script:SeemlessState.Preview=$preview;$script:SeemlessState.View='Preview';Set-SeemlessStatus 'Preview stays on your desktop. E: edit text  O: open outside  Esc: files'
+}
+function Start-SeemlessEditor {
+    param($Preview)
+    if(-not $Preview.Editable){Set-SeemlessStatus 'This file is available as a preview only.';return}
+    $lines=New-Object 'System.Collections.Generic.List[string]'
+    foreach($line in ($Preview.Text -split '\r?\n',0)){$lines.Add($line)}
+    if(-not $lines.Count){$lines.Add('')}
+    $script:SeemlessState.Document=@{Path=$Preview.Path;Name=$Preview.Name;Lines=$lines;CursorX=0;CursorY=0;Scroll=0;Dirty=$false;New=$false;Encoding=$Preview.Encoding;Newline="`n";LastWrite=$Preview.LastWrite}
+    if($Preview.Text.Contains("`r`n")){$script:SeemlessState.Document.Newline="`r`n"}
+    $script:SeemlessState.View='Editor';Set-SeemlessStatus 'Your changes stay here until you save. Ctrl+S: save'
+}
+function Save-SeemlessDocument {
+    $doc=$script:SeemlessState.Document;$temporary=$null;$createdNew=$false
+    try{
+        $text=[string]::Join($doc.Newline,$doc.Lines.ToArray())
+        if($doc.New){
+            # CreateNew refuses an existing file, including one created since the prompt.
+            $stream=New-Object IO.FileStream($doc.Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $createdNew=$true
+            try{$writer=New-Object IO.StreamWriter($stream,$doc.Encoding);try{$writer.Write($text);$writer.Flush()}finally{$writer.Dispose()}}finally{$stream.Dispose()}
+            $createdNew=$false
+        }else{
+            $existing=Get-Item -LiteralPath $doc.Path -ErrorAction Stop
+            if($existing.LastWriteTimeUtc.Ticks -ne $doc.LastWrite){throw 'This file changed outside the desktop. Save was stopped to protect those changes.'}
+            $temporary=Join-Path $existing.DirectoryName ('.seemless-'+[Guid]::NewGuid().ToString('N')+'.tmp')
+            [IO.File]::WriteAllText($temporary,$text,$doc.Encoding)
+            if((Get-Item -LiteralPath $doc.Path).LastWriteTimeUtc.Ticks -ne $doc.LastWrite){throw 'This file changed while saving. Your original file has been left untouched.'}
+            # Replace only after the complete text has been written beside the original.
+            [IO.File]::Replace($temporary,$doc.Path,[NullString]::Value)
+            $temporary=$null
+        }
+        $doc.LastWrite=(Get-Item -LiteralPath $doc.Path).LastWriteTimeUtc.Ticks;$doc.Dirty=$false;$doc.New=$false
+        Set-SeemlessStatus ('Saved '+$doc.Name);return $true
+    }catch{
+        if($createdNew){try{[IO.File]::Delete($doc.Path)}catch{}}
+        Set-SeemlessStatus ('Could not save: '+$_.Exception.Message);return $false
+    }finally{if($temporary){try{[IO.File]::Delete($temporary)}catch{}}}
+}
+function New-SeemlessItem {
+    param([string]$Name,[switch]$Folder)
+    $Name=$Name.Trim()
+    if(-not $Name -or $Name -in @('.','..') -or $Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or $Name -match '[/\\]' -or $Name -match '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$' -or $Name.EndsWith('.')){throw 'Choose a normal filename without a path or reserved device name.'}
+    $target=Join-Path $script:SeemlessState.Path $Name
+    if(Test-Path -LiteralPath $target){throw 'That name already exists. Choose a different name.'}
+    if($Folder){[void][IO.Directory]::CreateDirectory($target);Update-SeemlessFiles;Set-SeemlessStatus ('Created folder '+$Name)}
+    else{
+        $lines=New-Object 'System.Collections.Generic.List[string]';$lines.Add('')
+        $script:SeemlessState.Document=@{Path=$target;Name=$Name;Lines=$lines;CursorX=0;CursorY=0;Scroll=0;Dirty=$true;New=$true;Encoding=(New-Object Text.UTF8Encoding($false));Newline="`r`n";LastWrite=0}
+        $script:SeemlessState.View='Editor';Set-SeemlessStatus 'New text file. Type here, then Ctrl+S to save.'
+    }
+}
+function Request-SeemlessLeave {
+    param([string]$Destination)
+    $st=$script:SeemlessState
+    if($Destination -eq 'Exit' -and $st.InstallJob -and $st.InstallJob.Running){Set-SeemlessStatus 'An installation is still running. You can use the desktop while it finishes.';return $false}
+    if($st.View -eq 'Editor' -and $st.Document.Dirty){$st.Modal=@{Kind='Unsaved';Name=$st.Document.Name;PendingView=$Destination};return $false}
+    if($Destination -eq 'Exit'){$st.Running=$false}else{Open-SeemlessView $Destination};return $true
+}
+function Invoke-SeemlessEditorKey {
+    param([ConsoleKeyInfo]$Key)
+    $doc=$script:SeemlessState.Document;$line=$doc.Lines[$doc.CursorY]
+    if($Key.Key -eq 'S' -and ($Key.Modifiers -band [ConsoleModifiers]::Control)){[void](Save-SeemlessDocument);return}
+    switch($Key.Key){
+        'UpArrow' {$doc.CursorY=[Math]::Max(0,$doc.CursorY-1)}
+        'DownArrow' {$doc.CursorY=[Math]::Min($doc.Lines.Count-1,$doc.CursorY+1)}
+        'LeftArrow' {if($doc.CursorX -gt 0){$doc.CursorX--}elseif($doc.CursorY -gt 0){$doc.CursorY--;$doc.CursorX=$doc.Lines[$doc.CursorY].Length}}
+        'RightArrow' {if($doc.CursorX -lt $line.Length){$doc.CursorX++}elseif($doc.CursorY -lt $doc.Lines.Count-1){$doc.CursorY++;$doc.CursorX=0}}
+        'Home' {$doc.CursorX=0}
+        'End' {$doc.CursorX=$line.Length}
+        'PageUp' {$doc.CursorY=[Math]::Max(0,$doc.CursorY-10)}
+        'PageDown' {$doc.CursorY=[Math]::Min($doc.Lines.Count-1,$doc.CursorY+10)}
+        'Enter' {$doc.Lines[$doc.CursorY]=$line.Substring(0,$doc.CursorX);$doc.Lines.Insert($doc.CursorY+1,$line.Substring($doc.CursorX));$doc.CursorY++;$doc.CursorX=0;$doc.Dirty=$true}
+        'Backspace' {if($doc.CursorX -gt 0){$doc.Lines[$doc.CursorY]=$line.Remove($doc.CursorX-1,1);$doc.CursorX--;$doc.Dirty=$true}elseif($doc.CursorY -gt 0){$previous=$doc.Lines[$doc.CursorY-1];$doc.Lines[$doc.CursorY-1]=$previous+$line;$doc.Lines.RemoveAt($doc.CursorY);$doc.CursorY--;$doc.CursorX=$previous.Length;$doc.Dirty=$true}}
+        'Delete' {if($doc.CursorX -lt $line.Length){$doc.Lines[$doc.CursorY]=$line.Remove($doc.CursorX,1);$doc.Dirty=$true}elseif($doc.CursorY -lt $doc.Lines.Count-1){$doc.Lines[$doc.CursorY]+=$doc.Lines[$doc.CursorY+1];$doc.Lines.RemoveAt($doc.CursorY+1);$doc.Dirty=$true}}
+        default {if(-not [char]::IsControl($Key.KeyChar)){$doc.Lines[$doc.CursorY]=$line.Insert($doc.CursorX,[string]$Key.KeyChar);$doc.CursorX++;$doc.Dirty=$true}}
+    }
+    $doc.CursorX=[Math]::Min($doc.CursorX,$doc.Lines[$doc.CursorY].Length)
+}
+function Start-SeemlessInstall {
+    param($App)
+    $st=$script:SeemlessState
+    if($st.InstallJob -and $st.InstallJob.Running){$st.View='Install';Set-SeemlessStatus 'One app is already installing. Please wait for it to finish.';return}
+    $winget=Get-Command winget.exe -ErrorAction SilentlyContinue
+    $st.InstallApp=$App;$st.InstallLog=@();$st.InstallResult='';$st.View='Install'
+    try{if(-not $winget){throw 'App Installer is missing. Install Microsoft App Installer to enable downloads.'};$st.InstallJob=New-Object SeemlessInstallJob($winget.Source,$App.Id);Set-SeemlessStatus ('Installing '+$App.Name+' in the background. You can keep using your desktop.')}
+    catch{$st.InstallJob=$null;$st.InstallResult=$_.Exception.Message;Set-SeemlessStatus $st.InstallResult}
+}
+function Update-SeemlessInstall {
+    $st=$script:SeemlessState
+    if(-not $st.InstallJob){return $false}
+    $st.InstallLog=@($st.InstallJob.Snapshot()|ForEach-Object{ConvertTo-SeemlessSafeText $_})
+    if(-not $st.InstallJob.Running){
+        $code=$st.InstallJob.ExitCode
+        $st.InstallLog=@($st.InstallJob.Snapshot()|ForEach-Object{ConvertTo-SeemlessSafeText $_})
+        $st.InstallJob.Dispose();$st.InstallJob=$null
+        if($code -eq 0){$st.InstallResult=$st.InstallApp.Name+' is ready.'}else{$st.InstallResult='Installation did not finish (code '+$code+'). Details are shown below.'}
+        Set-SeemlessStatus $st.InstallResult
+    }
+    return $true
+}
+
 function Get-SeemlessGeometry {
     $w=[Math]::Max(20,[Console]::WindowWidth-1);$h=[Math]::Max(8,[Console]::WindowHeight)
     return @{W=$w;H=$h;X=2;Y=3;WW=$w-4;WH=$h-7;BodyX=4;BodyY=7;BodyW=$w-8;BodyH=[Math]::Max(1,$h-13)}
@@ -264,18 +455,18 @@ function Show-SeemlessScreen {
         $screen.Fill($offset,$y,[Math]::Max(0,$g.W-$offset),1,$c.Ink,(0x08264B+$y*256))
     }
     $screen.Text(2,0,'N0VA  /  Seemless 0S MODE',$c.Accent,$c.Desktop)
-    $screen.Text([Math]::Max(2,$g.W-28),0,('Made by N0VALID  |  v1.0'),$c.Muted,$c.Desktop)
+    $screen.Text([Math]::Max(2,$g.W-28),0,('Made by N0VALID  |  2.0'),$c.Muted,$c.Desktop)
     $screen.Fill(0,$g.H-3,$g.W,1,$c.Muted,$c.Side)
     $screen.Text(2,$g.H-3,(ConvertTo-SeemlessSafeText $st.Status),$c.Muted,$c.Side)
     $screen.Fill(0,$g.H-2,$g.W,2,$c.Ink,0x0A1326)
-    $screen.Text(2,$g.H-2,'[S] Start   F1 Desktop  F2 Files  F3 Web  F4 Apps  F5 Control',$c.Ink,0x0A1326)
-    $screen.Text(2,$g.H-1,'Arrows: select   Enter: open   Esc: desktop   F10: return to N0VA',$c.Muted,0x0A1326)
+    $screen.Text(2,$g.H-2,'[S] Start    F2 Files    F3 Internet    F4 Apps    F5 Settings',$c.Ink,0x0A1326)
+    $screen.Text(2,$g.H-1,'Choose with arrows and Enter       Esc: back       F10: leave desktop',$c.Muted,0x0A1326)
     $clock=(Get-Date).ToString('HH:mm  dd MMM')
     if($g.W -gt 95){$screen.Text($g.W-$clock.Length-2,$g.H-2,$clock,$c.Accent,0x0A1326)}
     if($st.View -in @('Desktop','Start')) {
-        $screen.Text(5,4,'YOUR WORKSPACE.',$c.Ink,$c.Desktop)
-        $screen.Text(5,6,'Everything you need, one terminal.',$c.Muted,$c.Desktop)
-        $cards=@('File Explorer','Web Reader','App Center','Control Panel')
+        $screen.Text(5,4,'Welcome home.',$c.Ink,$c.Desktop)
+        $screen.Text(5,6,'Your files, apps and settings. All right here.',$c.Muted,$c.Desktop)
+        $cards=@('Files','Internet','Apps','Settings')
         for($i=0;$i -lt 4;$i++){
             $y=9+$i*2;if($y -ge $g.H-5){break}
             $bg=$c.Desktop;$fg=$c.Ink;if($st.DesktopIndex -eq $i){$bg=$c.Select;$fg=$c.Accent}
@@ -291,29 +482,30 @@ function Show-SeemlessScreen {
             $sx=3;$sy=[Math]::Max(3,$g.H-19);$sw=[Math]::Min(43,$g.W-6)
             Draw-SeemlessBox $screen $sx $sy $sw 14 'Start'
             $screen.Text($sx+2,$sy+2,'PINNED',$c.Muted,$c.Panel)
-            $startItems=@(@{Name='File Explorer'},@{Name='Web Reader'},@{Name='App Center'},@{Name='Control Panel'},@{Name='Return to N0VA'})
+            $startItems=@(@{Name='Files'},@{Name='Internet'},@{Name='Apps'},@{Name='Settings'},@{Name='Leave desktop'})
             Draw-SeemlessList $screen $startItems $st.StartIndex ($sx+2) ($sy+4) ($sw-4) 6 'Start'
             $screen.Text($sx+2,$sy+11,'N0VALID       Your terminal workspace',$c.Accent,$c.Panel)
         }
     }else{
-        $titles=@{Explorer='File Explorer';Web='Web Reader';Apps='App Center';Control='Control Panel'}
+        $titles=@{Explorer='Files';Web='Internet';Apps='Apps';Control='Settings';Preview='Quick look';Editor='Notes';Install='App download'}
         Draw-SeemlessBox $screen $g.X $g.Y $g.WW $g.WH $titles[$st.View]
         switch($st.View){
             'Explorer' {
                 $screen.Text($g.BodyX,5,('This PC > '+$st.Path),$c.Accent,$c.Panel)
-                $screen.Text($g.BodyX,$g.H-6,'L Location  H Home  N N0VA  Backspace Parent  R Refresh',$c.Muted,$c.Side)
-                Draw-SeemlessList $screen $st.Files $st.FileIndex $g.BodyX $g.BodyY $g.BodyW $g.BodyH 'Files'
+                $screen.Text($g.BodyX,$g.H-6,'Enter: preview   T: new note   M: new folder   L: location',$c.Muted,$c.Side)
+                Draw-SeemlessList $screen $st.Files $st.FileIndex $g.BodyX $g.BodyY $g.BodyW ($g.BodyH-1) 'Files'
+                if($st.Files.Count){$selected=$st.Files[$st.FileIndex];$screen.Text($g.BodyX,$g.H-7,('Selected: '+$selected.Name+'  |  '+$selected.LastWriteTime.ToString('g')),$c.Muted,$c.Panel)}
             }
             'Apps' {
                 $apps=@(Get-SeemlessVisibleApps)
-                $screen.Text($g.BodyX,5,('Browse apps   |   Search: '+$(if($st.AppQuery){$st.AppQuery}else{'all apps'})),$c.Accent,$c.Panel)
+                $screen.Text($g.BodyX,5,('Find something useful   |   '+$(if($st.AppQuery){$st.AppQuery}else{'all apps'})),$c.Accent,$c.Panel)
                 $listWidth=$g.BodyW
                 if($g.W -gt 110){$listWidth=[int]($g.BodyW*.57)}
                 Draw-SeemlessList $screen $apps $st.AppIndex $g.BodyX $g.BodyY $listWidth $g.BodyH 'Apps'
                 if($g.W -gt 110 -and $apps.Count -gt 0){
                     $app=$apps[$st.AppIndex];$dx=$g.BodyX+$listWidth+3
                     $screen.Text($dx,8,$app.Name,$c.Accent,$c.Panel)
-                    $screen.Text($dx,10,$app.Id,$c.Muted,$c.Panel)
+                    $screen.Text($dx,10,$app.Category,$c.Muted,$c.Panel)
                     $detail=@(Get-SeemlessLines $app.Detail ($g.BodyW-$listWidth-4))
                     for($i=0;$i -lt $detail.Count -and $i -lt 4;$i++){$screen.Text($dx,12+$i,$detail[$i],$c.Ink,$c.Panel)}
                     $screen.Text($dx,18,'Enter to install',$c.Green,$c.Panel)
@@ -321,9 +513,51 @@ function Show-SeemlessScreen {
                 $screen.Text($g.BodyX,$g.H-6,'/ Search   Enter Install selected app   R Reset search',$c.Muted,$c.Side)
             }
             'Control' {
-                $screen.Text($g.BodyX,5,'Settings and tools on this Windows PC',$c.Accent,$c.Panel)
-                Draw-SeemlessList $screen $script:SeemlessControls $st.ControlIndex $g.BodyX $g.BodyY $g.BodyW $g.BodyH 'Control'
-                $screen.Text($g.BodyX,$g.H-6,'Enter opens the selected Windows setting or utility',$c.Muted,$c.Side)
+                $screen.Text($g.BodyX,5,'Make this desktop yours. Learn about this PC.',$c.Accent,$c.Panel)
+                $category=$script:SeemlessControls[$st.ControlIndex].Name
+                $detail=@(Get-SeemlessSettingLines $category)
+                $left=[Math]::Min(23,[int]($g.BodyW*.3))
+                Draw-SeemlessList $screen $script:SeemlessControls $st.ControlIndex $g.BodyX $g.BodyY $left ([Math]::Min(5,$g.BodyH)) 'Control'
+                $dx=$g.BodyX+$left+2;$dw=$g.BodyW-$left-2
+                $wrapped=@(Get-SeemlessLines ([string]::Join("`n",$detail)) $dw)
+                $st.SettingsScroll=[Math]::Min($st.SettingsScroll,[Math]::Max(0,$wrapped.Count-$g.BodyH))
+                for($i=0;$i -lt $g.BodyH -and ($i+$st.SettingsScroll) -lt $wrapped.Count;$i++){$screen.Text($dx,$g.BodyY+$i,$wrapped[$i+$st.SettingsScroll],$c.Ink,$c.Panel)}
+                $screen.Text($g.BodyX,$g.H-6,'Arrows: category   PageUp/Down: details   R: refresh',$c.Muted,$c.Side)
+            }
+            'Preview' {
+                $p=$st.Preview
+                $screen.Text($g.BodyX,5,$p.Name,$c.Accent,$c.Panel)
+                $lines=$p.Lines
+                $p.Scroll=[Math]::Min($p.Scroll,[Math]::Max(0,$lines.Count-$g.BodyH))
+                for($i=0;$i -lt $g.BodyH -and ($i+$p.Scroll) -lt $lines.Count;$i++){$screen.Text($g.BodyX,$g.BodyY+$i,$lines[$i+$p.Scroll],$c.Ink,$c.Panel)}
+                $screen.Text($g.BodyX,$g.H-6,'E: edit text    O: open in Windows app    Esc: files',$c.Muted,$c.Side)
+            }
+            'Editor' {
+                $d=$st.Document;$dirty='';if($d.Dirty){$dirty='  * Unsaved'}
+                $screen.Text($g.BodyX,5,($d.Name+$dirty),$c.Accent,$c.Panel)
+                if($d.CursorY -lt $d.Scroll){$d.Scroll=$d.CursorY};if($d.CursorY -ge $d.Scroll+$g.BodyH){$d.Scroll=$d.CursorY-$g.BodyH+1}
+                $horizontal=[Math]::Max(0,$d.CursorX-$g.BodyW+9)
+                for($i=0;$i -lt $g.BodyH -and ($i+$d.Scroll) -lt $d.Lines.Count;$i++){
+                    $index=$i+$d.Scroll;$line=$d.Lines[$index];if($horizontal -lt $line.Length){$line=$line.Substring($horizontal)}else{$line=''}
+                    $screen.Text($g.BodyX,$g.BodyY+$i,('{0,3} ' -f ($index+1)),$c.Muted,$c.Panel)
+                    $screen.Text($g.BodyX+4,$g.BodyY+$i,$line,$c.Ink,$c.Panel)
+                }
+                $cursor=$d.Lines[$d.CursorY];$char=' ';if($d.CursorX -lt $cursor.Length){$char=[string]$cursor[$d.CursorX]}
+                $screen.Text($g.BodyX+4+$d.CursorX-$horizontal,$g.BodyY+$d.CursorY-$d.Scroll,$char,$c.Desktop,$c.Accent)
+                $screen.Text($g.BodyX,$g.H-6,'Ctrl+S: save your note    Esc: back to files',$c.Muted,$c.Side)
+            }
+            'Install' {
+                $name='App';if($st.InstallApp){$name=$st.InstallApp.Name}
+                $screen.Text($g.BodyX,5,('Getting '+$name+' ready'),$c.Accent,$c.Panel)
+                $message=$st.InstallResult
+                if($st.InstallJob){$message='Installing... You can keep using your desktop.'}
+                $screen.Text($g.BodyX,7,$message,$c.Green,$c.Panel)
+                $screen.Text($g.BodyX,9,'Your download stays here. No extra terminal windows.',$c.Muted,$c.Panel)
+                $logs=@($st.InstallLog|Select-Object -Last ([Math]::Max(1,$g.BodyH-5)))
+                if($st.InstallResult -and $st.InstallResult -notmatch 'is ready'){
+                    for($i=0;$i -lt $logs.Count;$i++){$screen.Text($g.BodyX,12+$i,$logs[$i],$c.Muted,$c.Panel)}
+                }elseif($st.InstallJob){$tick=[int]((Get-Date).Second%4);$screen.Text($g.BodyX,12,(@('Working   .','Working  ..','Working ...','Working  ..')[$tick]),$c.Accent,$c.Panel)}
+                $screen.Text($g.BodyX,$g.H-6,'Esc: apps    F2: files    F5: settings',$c.Muted,$c.Side)
             }
             'Web' {
                 $address='Start page';if($st.Browser){$address=$st.Browser.Url}
@@ -354,10 +588,16 @@ function Show-SeemlessScreen {
         $mw=[Math]::Min(66,$g.W-6);$mx=[int](($g.W-$mw)/2);$my=[Math]::Max(2,[int](($g.H-8)/2))
         $screen.Fill(0,0,$g.W,1,$c.Muted,$c.Desktop)
         if($st.Modal){
-            Draw-SeemlessBox $screen $mx $my $mw 8 'Install app'
-            $screen.Text($mx+2,$my+2,('Install '+$st.Modal.Name+'?'),$c.Ink,$c.Panel)
-            $screen.Text($mx+2,$my+3,$st.Modal.Id,$c.Muted,$c.Panel)
-            $screen.Text($mx+2,$my+5,'[Y] Install with WinGet     [Esc / N] Cancel',$c.Green,$c.Panel)
+            if($st.Modal.Kind -eq 'Unsaved'){
+                Draw-SeemlessBox $screen $mx $my $mw 8 'Keep your changes?'
+                $screen.Text($mx+2,$my+2,('You have unsaved changes to '+$st.Modal.Name),$c.Ink,$c.Panel)
+                $screen.Text($mx+2,$my+4,'[S] Save   [D] Discard   [Esc] Keep editing',$c.Accent,$c.Panel)
+            }else{
+                Draw-SeemlessBox $screen $mx $my $mw 8 'Get this app'
+                $screen.Text($mx+2,$my+2,('Install '+$st.Modal.Name+'?'),$c.Ink,$c.Panel)
+                $screen.Text($mx+2,$my+3,'It will download and install on this PC.',$c.Muted,$c.Panel)
+                $screen.Text($mx+2,$my+5,'[Y] Install     [Esc / N] Not now',$c.Green,$c.Panel)
+            }
         }else{
             Draw-SeemlessBox $screen $mx $my $mw 8 $st.Prompt.Title
             $screen.Text($mx+2,$my+2,$st.Prompt.Hint,$c.Muted,$c.Panel)
@@ -385,12 +625,14 @@ function Invoke-SeemlessPrompt {
         'Location' {Update-SeemlessFiles $prompt.Value}
         'Search' {$st.AppQuery=$prompt.Value.Trim();$st.AppIndex=0}
         'Address' {Open-SeemlessPage $prompt.Value}
+        'NewText' {New-SeemlessItem $prompt.Value}
+        'NewFolder' {New-SeemlessItem $prompt.Value -Folder}
     }
 }
 function Invoke-SeemlessKey {
     param([ConsoleKeyInfo]$Key)
     $st=$script:SeemlessState
-    if($Key.Key -eq 'F10'){$st.Running=$false;return}
+    if($Key.Key -eq 'F10' -and -not $st.Modal){[void](Request-SeemlessLeave Exit);return}
     if($st.Prompt){
         if($Key.Key -eq 'Escape'){$st.Prompt=$null;Set-SeemlessStatus 'Canceled.';return}
         if($Key.Key -eq 'A' -and ($Key.Modifiers -band [ConsoleModifiers]::Control)){$st.Prompt.Value='';return}
@@ -400,19 +642,29 @@ function Invoke-SeemlessKey {
         return
     }
     if($st.Modal){
-        if($Key.Key -eq 'Y'){$app=$st.Modal;$st.Modal=$null;Install-SeemlessApp $app}
-        elseif($Key.Key -in @('Escape','N')){$st.Modal=$null;Set-SeemlessStatus 'Installation canceled.'}
+        if($st.Modal.Kind -eq 'Unsaved'){
+            $target=$st.Modal.PendingView
+            if($Key.Key -eq 'Escape'){$st.Modal=$null}
+            elseif($Key.Key -eq 'S'){if(Save-SeemlessDocument){$st.Modal=$null;[void](Request-SeemlessLeave $target)}}
+            elseif($Key.Key -eq 'D'){$st.Document.Dirty=$false;$st.Modal=$null;[void](Request-SeemlessLeave $target)}
+        }else{
+            if($Key.Key -eq 'Y'){$app=$st.Modal;$st.Modal=$null;Start-SeemlessInstall $app}
+            elseif($Key.Key -in @('Escape','N')){$st.Modal=$null;Set-SeemlessStatus 'Not installed.'}
+        }
         return
     }
+    $destination=$null
     switch($Key.Key){
-        'F1' {Open-SeemlessView Desktop;return}
-        'F2' {Open-SeemlessView Explorer;return}
-        'F3' {Open-SeemlessView Web;return}
-        'F4' {Open-SeemlessView Apps;return}
-        'F5' {Open-SeemlessView Control;return}
-        'S' {if($st.View -eq 'Start'){$st.View='Desktop'}else{$st.View='Start'};return}
-        'Escape' {Open-SeemlessView Desktop;return}
+        'F1' {$destination='Desktop'}
+        'F2' {$destination='Explorer'}
+        'F3' {$destination='Web'}
+        'F4' {$destination='Apps'}
+        'F5' {$destination='Control'}
+        'Escape' {$destination='Desktop';if($st.View -in @('Preview','Editor')){$destination='Explorer'};if($st.View -eq 'Install'){$destination='Apps'}}
+        'S' {if($st.View -ne 'Editor'){$destination='Start';if($st.View -eq 'Start'){$destination='Desktop'}}}
     }
+    if($destination){[void](Request-SeemlessLeave $destination);return}
+    if($st.View -eq 'Editor'){Invoke-SeemlessEditorKey $Key;return}
     $delta=0
     if($Key.Key -in @('DownArrow','RightArrow')){$delta=1}
     if($Key.Key -in @('UpArrow','LeftArrow')){$delta=-1}
@@ -424,7 +676,7 @@ function Invoke-SeemlessKey {
         }
         'Start' {
             $st.StartIndex=[Math]::Max(0,[Math]::Min(4,$st.StartIndex+$delta))
-            if($Key.Key -eq 'Enter'){if($st.StartIndex -eq 4){$st.Running=$false}else{Open-SeemlessView @('Explorer','Web','Apps','Control')[$st.StartIndex]}}
+            if($Key.Key -eq 'Enter'){if($st.StartIndex -eq 4){[void](Request-SeemlessLeave Exit)}else{Open-SeemlessView @('Explorer','Web','Apps','Control')[$st.StartIndex]}}
         }
         'Explorer' {
             $st.FileIndex=[Math]::Max(0,[Math]::Min([Math]::Max(0,$st.Files.Count-1),$st.FileIndex+$delta))
@@ -434,7 +686,10 @@ function Invoke-SeemlessKey {
                 'N' {if(-not (Test-Path -LiteralPath $InstallDir)){[void][IO.Directory]::CreateDirectory($InstallDir)};Update-SeemlessFiles $InstallDir}
                 'R' {Update-SeemlessFiles}
                 'Backspace' {$parent=[IO.Directory]::GetParent($st.Path);if($parent){Update-SeemlessFiles $parent.FullName}}
-                'Enter' {if($st.Files.Count){$item=$st.Files[$st.FileIndex];if($item.PSIsContainer){Update-SeemlessFiles $item.FullName}else{Start-SeemlessExternal $item.FullName}}}
+                'Enter' {if($st.Files.Count){$item=$st.Files[$st.FileIndex];if($item.PSIsContainer){Update-SeemlessFiles $item.FullName}else{Open-SeemlessFile $item.FullName}}}
+                'O' {if($st.Files.Count){Start-SeemlessExternal $st.Files[$st.FileIndex].FullName}}
+                'T' {Start-SeemlessPrompt NewText 'New note' 'Give your note a filename, for example ideas.txt'}
+                'M' {Start-SeemlessPrompt NewFolder 'New folder' 'Choose a name for the folder.'}
             }
         }
         'Apps' {
@@ -445,7 +700,19 @@ function Invoke-SeemlessKey {
         }
         'Control' {
             $st.ControlIndex=[Math]::Max(0,[Math]::Min($script:SeemlessControls.Count-1,$st.ControlIndex+$delta))
-            if($Key.Key -eq 'Enter'){Start-SeemlessExternal $script:SeemlessControls[$st.ControlIndex].Target}
+            if($delta){$st.SettingsScroll=0}
+            if($Key.Key -eq 'R'){$st.SettingsCache=@{}}
+            if($Key.Key -eq 'PageDown'){$st.SettingsScroll += 5};if($Key.Key -eq 'PageUp'){$st.SettingsScroll=[Math]::Max(0,$st.SettingsScroll-5)}
+            if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Appearance'){
+                $themes=@('Ocean','Emerald','Violet');$next=($themes.IndexOf($st.Theme)+1)%3;Set-SeemlessTheme $themes[$next] -Save;$st.SettingsCache=@{}
+            }
+        }
+        'Preview' {
+            if($Key.Key -eq 'E'){Start-SeemlessEditor $st.Preview}
+            if($Key.Key -eq 'O'){Start-SeemlessExternal $st.Preview.Path}
+            $st.Preview.Scroll=[Math]::Max(0,$st.Preview.Scroll+$delta)
+            if($Key.Key -eq 'PageDown'){$st.Preview.Scroll += [Math]::Max(1,$st.Height-13)}
+            if($Key.Key -eq 'PageUp'){$st.Preview.Scroll=[Math]::Max(0,$st.Preview.Scroll-[Math]::Max(1,$st.Height-13))}
         }
         'Web' {
             switch($Key.Key){
@@ -470,19 +737,22 @@ function Start-SeemlessOS {
     $oldFg=[Console]::ForegroundColor;$oldBg=[Console]::BackgroundColor;$oldTitle=''
     try{$oldTitle=[Console]::Title}catch{}
     $oldCursor=$true;try{$oldCursor=[Console]::CursorVisible}catch{}
+    $oldControlC=$false;try{$oldControlC=[Console]::TreatControlCAsInput;[Console]::TreatControlCAsInput=$true}catch{}
     $oldMode=[uint32]0;$changedMode=$false;$handle=[IntPtr]::Zero
     try {
         try{$handle=[SeemlessNative]::GetStdHandle(-11);if([SeemlessNative]::GetConsoleMode($handle,[ref]$oldMode)){$changedMode=[SeemlessNative]::SetConsoleMode($handle,($oldMode -bor 4));$st.Ansi=$changedMode}}catch{$st.Ansi=($env:TERM -match 'xterm|screen|vt100')}
         [Console]::Title='Seemless 0S MODE - Made by N0VALID'
         [Console]::CursorVisible=$false
         [Console]::BackgroundColor='Black';[Console]::ForegroundColor='Cyan'
-        $lastSize='';$lastClock=''
+        $lastSize='';$lastClock='';$lastInstallTick=[DateTime]::MinValue
         while($st.Running){
+            [void](Update-SeemlessInstall)
             Show-SeemlessScreen
             $lastSize='{0}:{1}' -f [Console]::WindowWidth,[Console]::WindowHeight
             $lastClock=(Get-Date).ToString('HH:mm')
             while(-not [Console]::KeyAvailable){
                 Start-Sleep -Milliseconds 35
+                if($st.InstallJob -and ((Get-Date)-$lastInstallTick).TotalMilliseconds -gt 500){$lastInstallTick=Get-Date;break}
                 if($lastSize -ne ('{0}:{1}' -f [Console]::WindowWidth,[Console]::WindowHeight) -or $lastClock -ne (Get-Date).ToString('HH:mm')){break}
             }
             if([Console]::KeyAvailable){
@@ -492,6 +762,7 @@ function Start-SeemlessOS {
     }finally{
         [Console]::ForegroundColor=$oldFg;[Console]::BackgroundColor=$oldBg
         [Console]::CursorVisible=$oldCursor
+        try{[Console]::TreatControlCAsInput=$oldControlC}catch{}
         try{[Console]::Title=$oldTitle}catch{}
         if($changedMode){[void][SeemlessNative]::SetConsoleMode($handle,$oldMode)}
         [Console]::Clear()

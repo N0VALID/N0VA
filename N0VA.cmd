@@ -20,6 +20,7 @@ if errorlevel 1 (
 color 0B
 
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
+set "N0VA_BUILD=2.0"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
 for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
 set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
@@ -36,7 +37,7 @@ if "%choice%"=="100" goto previous_page
 goto dispatch
 
 :menu_fallback
-echo N0VA - Made by N0VALID - v1.9 - Page %N0VA_PAGE% of 2
+echo N0VA - Made by N0VALID - v2.0 - Page %N0VA_PAGE% of 2
 if "%N0VA_PAGE%"=="1" (
     echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
@@ -262,7 +263,7 @@ where curl.exe >nul 2>&1
 if errorlevel 1 exit /b 1
 set "TEMP_FILE=%INSTALL_DIR%\%~1.partial"
 if exist "%TEMP_FILE%" del /q "%TEMP_FILE%" >nul 2>&1
-curl.exe --fail --location --silent --retry 2 "%BASE_URL%/%~1" --output "%TEMP_FILE%" >nul 2>&1
+curl.exe --fail --location --silent --retry 2 "%BASE_URL%/%~1?build=%N0VA_BUILD%" --output "%TEMP_FILE%" >nul 2>&1
 if errorlevel 1 goto download_failed
 for %%F in ("%TEMP_FILE%") do if %%~zF EQU 0 goto download_failed
 move /y "%TEMP_FILE%" "%INSTALL_DIR%\%~1" >nul 2>&1
@@ -416,8 +417,19 @@ function Write-NovaCentered {
 function Read-NovaMenuChoice {
     param([int]$Page)
     $typed = ''
+    $f4Count = 0
+    $lastF4 = [DateTime]::MinValue
     while ($true) {
         $key = [Console]::ReadKey($true)
+        if ($key.Key -eq 'F4') {
+            $now = [DateTime]::UtcNow
+            if (($now - $lastF4).TotalSeconds -gt 2) { $f4Count = 0 }
+            $lastF4 = $now
+            $f4Count++
+            if ($f4Count -eq 5) { return 121 }
+            continue
+        }
+        $f4Count = 0
         switch ($key.Key) {
             'A' { return 100 }
             'D' { return 101 }
@@ -493,7 +505,7 @@ function Get-NovaMenuRows {
         @('[13] Install RustDesk                                     ', 'Green'),
         @('[21] Seemless 0S MODE - terminal desktop', 'Cyan'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.9', 'Magenta'),
+        @('[0] Exit                                             v2.0', 'Magenta'),
         @('[A] Previous page                       [D] Next page', 'Cyan')
     )
     if ($page -eq 2) {
@@ -539,6 +551,21 @@ if ($env:N0VA_VIEW -eq 'menu') {
     $selection = Read-NovaMenuChoice -Page $page
     if ($selection -eq 101) { $page = 2; continue }
     if ($selection -eq 100) { $page = 1; continue }
+    if ($selection -eq 121) {
+        $desktopFile = Join-Path $env:INSTALL_DIR 'SeemlessOS.ps1'
+        if (-not (Test-Path -LiteralPath $desktopFile -PathType Leaf)) { exit 21 }
+        $desktopSource = [IO.File]::ReadAllText($desktopFile)
+        # Refresh a saved desktop from an older build once, then launch locally.
+        if (-not $desktopSource.Contains('# N0VA desktop build: 2.0')) { exit 21 }
+        try {
+            & ([scriptblock]::Create($desktopSource)) -InstallDir $env:INSTALL_DIR
+        } catch {
+            Write-Host ('Desktop error: ' + $_.Exception.Message) -ForegroundColor Red
+            Write-Host 'Press a key to return to N0VA.'
+            [void][Console]::ReadKey($true)
+        }
+        continue
+    }
     exit $selection
     }
 }

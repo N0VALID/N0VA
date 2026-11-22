@@ -1,6 +1,6 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 1.9 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation uses the same running menu process and cached frames to avoid a blank screen between pages. It stops at the first and last pages, and returning from a tool keeps the current page.
+A Windows tool hub made by N0VALID. Version 2.0 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `A` or `D` to move between pages instantly. Type an option number and press Enter to select it; `0` then Enter closes CMD. Page navigation uses the same running menu process and cached frames to avoid a blank screen between pages. It stops at the first and last pages, and returning from a tool keeps the current page.
 
 ## Page 1 - Tools and setup
 
@@ -42,29 +42,25 @@ WinUtil opens in a separate administrator PowerShell window and leaves errors vi
 
 ## Seemless 0S MODE
 
-Choose **21** on page 1 to download and open the terminal desktop. It runs inside the current terminal and returns to N0VA when closed. It does not replace your Windows desktop or change your Windows shell.
+Choose **21** on page 1 for your terminal desktop. The hidden shortcut is **F4 five times** from either N0VA menu page, without Enter. The first use downloads or updates the desktop; after that, the shortcut opens the saved version directly. Press the keys consecutively, with less than two seconds between each press. The shortcut is not listed in the menu.
 
-The desktop includes a Start menu, file explorer, web reader, app installer, and control panel. App downloads use WinGet, with visible progress and installation results. The explorer navigates folders and opens selected files through their Windows associations. The web reader shows readable page text and links; use its external browser action for sign-ins, videos, or pages that require JavaScript.
+The desktop keeps common tasks inside its own windows:
 
-| Key | Desktop action |
-| --- | --- |
-| S | Toggle the Start menu |
-| F1 / F2 / F3 | Desktop / File Explorer / Web Reader |
-| F4 / F5 | App Center / Control Panel |
-| Arrows / Enter | Select and open |
-| Esc | Cancel a dialog or return to the desktop |
-| F10 | Return to N0VA |
+- **Files:** browse folders, preview files, read and edit text, and create a text file or folder. Unsaved changes have Save, Discard, and Cancel choices.
+- **Internet:** read page text, follow links, search, and go back. Full interactive websites can still be opened explicitly in your normal browser.
+- **Apps:** choose an app, confirm installation, and watch its progress inside the desktop. Windows may show its normal administrator prompt.
+- **Settings:** view PC, storage, network, and running-app information; choose a saved desktop theme.
 
-In File Explorer, `N` opens the N0VA downloads folder and `L` enters a folder path. In Web Reader, `L` enters a URL or search, `Tab` switches to links, `B` goes back, and `O` opens the page in your normal browser. App Center supports `/` search. Input fields support `Ctrl+A` to replace their contents.
+Use the arrows and Enter to select things. **S** opens Start, **Esc** goes home or cancels a dialog, and **F10** returns to N0VA. File windows and input boxes show the actions that are relevant there. **F1-F5** remain available for quick navigation. A running installation must finish before leaving the desktop.
 
-The mode is delivered as `SeemlessOS.ps1` in your Desktop N0VA folder. Windows PowerShell 5.1 and Windows Terminal are supported; no Python packages are required for the desktop.
+The desktop is delivered as `SeemlessOS.ps1` in your Desktop N0VA folder and requires no Python packages. Native Windows applications run in their own windows; the terminal desktop does not replace Windows or embed other programs' interfaces.
 
 ## Run the latest N0VA
 
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.9" -o "%TEMP%\N0VA-v1.9.cmd" && "%TEMP%\N0VA-v1.9.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=2.0" -o "%TEMP%\N0VA-v2.0.cmd" && "%TEMP%\N0VA-v2.0.cmd"
 ```
 
 ## Adding tools
