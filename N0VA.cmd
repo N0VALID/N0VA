@@ -149,11 +149,12 @@ if errorlevel 1 goto failed
 goto complete
 
 :folder
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
-if not exist "%INSTALL_DIR%" goto failed
-start "" "%INSTALL_DIR%" >nul 2>&1
+if not exist "%INSTALL_DIR%\." mkdir "%INSTALL_DIR%" >nul 2>&1
+if not exist "%INSTALL_DIR%\." goto failed
+rem Explicitly launch Explorer so N0VA.cmd cannot be selected by START.
+start "" "%SystemRoot%\explorer.exe" "%INSTALL_DIR%"
 if errorlevel 1 goto failed
-goto complete
+goto menu
 
 :download
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
