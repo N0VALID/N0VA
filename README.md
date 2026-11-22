@@ -1,6 +1,6 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 1.5 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `0` to close CMD.
+A Windows tool hub made by N0VALID. Version 1.6 includes RGB Matrix rain, a centered RGB menu, and a full-screen Windows Terminal launch. Press `0` to close CMD.
 
 ## Menu
 
@@ -18,9 +18,10 @@ A Windows tool hub made by N0VALID. Version 1.5 includes RGB Matrix rain, a cent
 | 10 | Install Brave |
 | 11 | Install Steam |
 | 12 | Install all Python dependencies used by the N0VA tools |
+| 13 | Install RustDesk |
 | 0 | Close N0VA and CMD |
 
-Options 10 and 11 use WinGet from Microsoft's App Installer. Accept installer or administrator prompts when Windows displays them. Downloads are stored in `Desktop\N0VA` (using your Windows Desktop location).
+Options 10, 11, and 13 use WinGet from Microsoft's App Installer. Accept installer or administrator prompts when Windows displays them. Downloads are stored in `Desktop\N0VA` (using your Windows Desktop location).
 
 The Python setup detects an existing interpreter or installs Python if needed, enables pip, and installs PyInstaller, PyAutoGUI, Pillow, and opencv-python with their dependencies. This covers EXE Compiler, Coordinate Finder, screenshots, and Command Explorer's image-confidence matching; it does not install every package on PyPI. Python's standard library and Tkinter come with the normal Windows Python installation.
 
@@ -31,7 +32,7 @@ WinUtil opens in a separate administrator PowerShell window and leaves errors vi
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.5" -o "%TEMP%\N0VA-v1.5.cmd" && "%TEMP%\N0VA-v1.5.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=1.6" -o "%TEMP%\N0VA-v1.6.cmd" && "%TEMP%\N0VA-v1.6.cmd"
 ```
 
 ## Adding tools
