@@ -29,11 +29,11 @@ cls
 set "N0VA_VIEW=menu"
 powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
 if errorlevel 1 (
-    echo N0VA - Made by N0VALID - v1.4
+    echo N0VA - Made by N0VALID - v1.5
     echo [1] Python  [2] EXE Compiler  [3] Computer Info  [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps   [7] Disk Cleanup   [8] Startup Apps
     echo [9] Command Explorer  [10] Install Brave  [11] Install Steam
-    echo [12] All Python dependencies  [13] Install everything  [0] Exit
+    echo [12] Install all Python packages    [0] Exit
 )
 set "N0VA_VIEW="
 set "choice="
@@ -50,7 +50,6 @@ if "%choice%"=="9" goto explorer
 if "%choice%"=="10" goto brave
 if "%choice%"=="11" goto steam
 if "%choice%"=="12" goto dependencies
-if "%choice%"=="13" goto install_all
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -128,25 +127,6 @@ set "N0VA_VIEW="
 pause
 goto menu
 
-
-:install_all
-cls
-set "N0VA_SETUP_FAILED="
-call :install_app "Brave.Brave"
-if errorlevel 1 set "N0VA_SETUP_FAILED=1"
-call :install_app "Valve.Steam"
-if errorlevel 1 set "N0VA_SETUP_FAILED=1"
-set "N0VA_VIEW=dependencies"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
-if errorlevel 1 set "N0VA_SETUP_FAILED=1"
-set "N0VA_VIEW="
-if defined N0VA_SETUP_FAILED (
-    echo Some installations failed. Check the messages above before retrying.
-) else (
-    echo Brave, Steam, and all N0VA Python dependencies are ready.
-)
-pause
-goto menu
 
 :updates
 cls
@@ -355,10 +335,9 @@ if ($env:N0VA_VIEW -eq 'menu') {
         @('[4] Open N0VA Folder              [8] Startup Apps         ', 'Cyan'),
         @('[9] Command Explorer             [10] Install Brave       ', 'Green'),
         @('[11] Install Steam               [12] All Python packages ', 'Cyan'),
-        @('[13] Install everything: Brave, Steam + Python packages   ', 'Green'),
         @('', 'Black'),
         @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v1.4', 'Magenta'),
+        @('[0] Exit                                             v1.5', 'Magenta'),
         @('', 'Black')
     )
     $top = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowHeight - $rows.Count - 1) / 2))
