@@ -7,7 +7,11 @@ internal static class Program
     {
         if (args.Contains("--check-runtime")) { try { Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString(); return 0; } catch { return 2; } }
         ApplicationConfiguration.Initialize();
-        if (args.Contains("--smoke-test")) return Smoke.Run();
+        if (args.Contains("--smoke-test")) {
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+            try { return Smoke.Run(); }
+            catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); return 1; }
+        }
         using var mutex = new Mutex(true, @"Local\N0VALID.NovaBrowser", out var first);
         if (!first) { MessageBox.Show("N0VA Browser is already open.", "N0VA Browser"); return 0; }
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "N0VA", "Browser");

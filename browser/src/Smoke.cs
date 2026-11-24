@@ -33,10 +33,12 @@ internal static class Smoke
                 }
             } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
         });
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "Starting native window");
         using var window = new BrowserWindow(root, new Preferences { AllowHttp = true });
         window.IntegrationTest = true;
         window.Shown += async (_, _) => {
             try {
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "Initializing WebView2 and blocker");
                 var t = window.Current!;
                 await window.Navigate(t, origin);
                 if (!t.Ready) throw new Exception("WebView2 initialization failed");
@@ -44,7 +46,7 @@ internal static class Smoke
                 var deadline = DateTime.UtcNow.AddSeconds(40);
                 while (c.DocumentTitle != "N0VA fixture" && DateTime.UtcNow < deadline) await Task.Delay(100);
                 if (c.DocumentTitle != "N0VA fixture") throw new Exception("Fixture did not load");
-                if (!window.BlockerReady || !(await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled)) throw new Exception("Blocker not enabled");
+                if (!window.BlockerReady || !(await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled && x.Name.Contains("uBlock", StringComparison.OrdinalIgnoreCase))) throw new Exception("Blocker not enabled");
                 if (c.Profile.PreferredTrackingPreventionLevel != CoreWebView2TrackingPreventionLevel.Strict || c.Settings.IsWebMessageEnabled || c.Settings.AreHostObjectsAllowed || !c.Settings.IsReputationCheckingRequired) throw new Exception("Privacy settings missing");
                 var links = await window.ScanFiles(t);
                 if (links.Count != 2 || !links.Any(x => x.Name == "manual.pdf")) throw new Exception("Download discovery failed: " + links.Count);

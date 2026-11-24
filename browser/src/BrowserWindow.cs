@@ -36,6 +36,7 @@ internal sealed partial class BrowserWindow : Form
     readonly HashSet<CoreWebView2DownloadOperation> activeDownloads = [];
     Task<CoreWebView2Environment>? environment;
     Task? blocker;
+    Task<string>? preparedBlocker;
     bool blockerReady;
     bool closing;
     int scanGeneration;
@@ -136,13 +137,14 @@ internal sealed partial class BrowserWindow : Form
         if (!Policy.WebUrl(target, prefs.AllowHttp)) { Notice("Navigation blocked. HTTPS is required; HTTP can be enabled in Settings."); return; }
         t.Pending = target;
         try {
-            t.Initialization ??= Initialize(t); await t.Initialization;
+            t.Initialization ??= Initialize(t); await t.Initialization.WaitAsync(TimeSpan.FromSeconds(60));
             if (t.IsDisposed || closing) return;
             t.Home?.Dispose(); t.Home = null; t.View!.Visible = true;
             t.View.CoreWebView2.Navigate(t.Pending); t.View.Focus(); Sync();
         } catch (Exception e) {
             if (t.IsDisposed || closing) return;
             t.Initialization = null; t.Ready = false; t.View?.Dispose(); t.View = null;
+            if (preparedBlocker?.IsFaulted == true) preparedBlocker = null;
             if (environment?.IsFaulted == true) environment = null; if (blocker?.IsFaulted == true) blocker = null;
             Notice("Website not opened: " + e.GetBaseException().Message);
             if (IntegrationTest) throw;
@@ -152,12 +154,14 @@ internal sealed partial class BrowserWindow : Form
     async Task Initialize(SiteTab t)
     {
         Notice("Starting browser protection…");
+        preparedBlocker ??= Blocker.Prepare(root);
+        var extensionPath = await preparedBlocker;
         environment ??= CoreWebView2Environment.CreateAsync(null, profileDirectory, new CoreWebView2EnvironmentOptions {
             AreBrowserExtensionsEnabled = true, EnableTrackingPrevention = true,
             AdditionalBrowserArguments = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
         });
         var env = await environment; if (t.IsDisposed || closing) return;
-        var view = new WebView2 { Dock = DockStyle.Fill, Visible = false, DefaultBackgroundColor = Surface }; t.View = view; t.Controls.Add(view);
+        var view = new WebView2 { Dock = DockStyle.Fill, Visible = true, DefaultBackgroundColor = Surface }; t.View = view; t.Controls.Add(view);
         await view.EnsureCoreWebView2Async(env); if (t.IsDisposed || closing) return;
         var c = view.CoreWebView2;
         c.Profile.PreferredTrackingPreventionLevel = CoreWebView2TrackingPreventionLevel.Strict;
@@ -182,7 +186,7 @@ internal sealed partial class BrowserWindow : Form
         c.NavigationCompleted += async (_, e) => { t.Loading = false; LabelTab(t); if (!e.IsSuccess) Notice("Page load failed: " + e.WebErrorStatus); if (t == Current && downloads.Visible) await RefreshFiles(); };
         c.DownloadStarting += (_, e) => DownloadStarting(e);
         c.ProcessFailed += (_, _) => Notice("A browser process stopped. Close this tab and open a new one.");
-        blocker ??= Blocker.Enable(c.Profile, root); await blocker;
+        blocker ??= Blocker.Enable(c.Profile, extensionPath); await blocker;
         blockerReady = true; t.Ready = true;
     }
     void LabelTab(SiteTab t)
