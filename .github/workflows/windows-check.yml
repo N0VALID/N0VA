@@ -1,0 +1,37 @@
+name: Windows option checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'N0VA.cmd'
+      - 'SeemlessOS.ps1'
+      - '*.pyw'
+      - 'tests/windows-check.ps1'
+      - '.github/workflows/windows-check.yml'
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check Windows tools, browser, and standalone installer
+        shell: powershell
+        run: ./tests/windows-check.ps1
+      - name: Resolve all app installer IDs
+        if: always()
+        shell: powershell
+        run: |
+          if (!(Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+            Install-Module Microsoft.WinGet.Client -Scope CurrentUser -Force -Repository PSGallery
+            Repair-WinGetPackageManager -AllUsers -Latest
+          }
+          $ids = (Select-String -Path SeemlessOS.ps1 -Pattern "Id='([^']+)';Category" -AllMatches).Matches | ForEach-Object { $_.Groups[1].Value }
+          if ($ids.Count -lt 14) { throw 'Missing app catalog entries' }
+          foreach ($id in $ids) {
+            winget show --id $id --exact --source winget --accept-source-agreements
+            if ($LASTEXITCODE) { throw "Package lookup failed for $id" }
+          }

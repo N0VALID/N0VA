@@ -1,10 +1,11 @@
-# N0VA desktop build: 2.1
+# N0VA desktop build: 2.2
 # Seemless 0S MODE - N0VA's keyboard-driven terminal desktop.
 # Windows PowerShell 5.1+, no third-party modules required.
 [CmdletBinding()]
-param([string]$InstallDir = '', [switch]$NoRun)
+param([string]$InstallDir = '', [switch]$NoRun, [switch]$BrowserOnly, [switch]$InstallBrowser)
 
 $ErrorActionPreference = 'Stop'
+$script:DesktopSourcePath=$PSCommandPath
 if (-not $InstallDir) {
     $desktop = [Environment]::GetFolderPath('Desktop')
     if (-not $desktop) { $desktop = [Environment]::GetFolderPath('UserProfile') }
@@ -129,7 +130,46 @@ function Open-SeemlessView {
     if($View -eq 'Explorer'){Update-SeemlessFiles;return}
     Set-SeemlessStatus ''
 }
+function Install-SeemlessBrowser([string]$Source) {
+    $folder=Join-Path $env:LOCALAPPDATA 'N0VA\Standalone'
+    [void][IO.Directory]::CreateDirectory($folder)
+    $target=Join-Path $folder 'SeemlessOS.ps1'
+    if([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($target)){
+        $temp=$target+'.'+[guid]::NewGuid().ToString('N')
+        try{[IO.File]::Copy($Source,$temp);Move-Item -LiteralPath $temp -Destination $target -Force -ErrorAction Stop}
+        finally{if([IO.File]::Exists($temp)){[IO.File]::Delete($temp)}}
+    }
+    $programs=[Environment]::GetFolderPath('Programs')
+    [void][IO.Directory]::CreateDirectory($programs)
+    $shell=New-Object -ComObject WScript.Shell
+    $link=$shell.CreateShortcut((Join-Path $programs 'Seemless Browser.lnk'))
+    $link.TargetPath=Join-Path $PSHOME 'powershell.exe'
+    $link.Arguments='-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$target+'" -BrowserOnly'
+    $link.WorkingDirectory=$folder
+    $link.Save()
+}
+function Save-SeemlessInstaller([string]$Destination,[string]$Source) {
+    $header=@'
+@echo off
+setlocal
+set "SEEMLESS_SETUP=%~f0"
+powershell.exe -NoProfile -STA -Command "$ErrorActionPreference='Stop';$text=[IO.File]::ReadAllText($env:SEEMLESS_SETUP);$mark='# SEEMLESS_PAYLOAD';$src=$text.Substring($text.LastIndexOf([Environment]::NewLine+$mark+[Environment]::NewLine)+$mark.Length+2*[Environment]::NewLine.Length);$tmp=Join-Path ([IO.Path]::GetTempPath()) (([guid]::NewGuid().ToString('N'))+'.ps1');try{[IO.File]::WriteAllBytes($tmp,[Convert]::FromBase64String($src));$p=Join-Path $PSHOME 'powershell.exe';& $p -NoProfile -STA -ExecutionPolicy Bypass -File $tmp -InstallBrowser;exit $LASTEXITCODE}finally{[IO.File]::Delete($tmp)}"
+if errorlevel 1 (echo Installation failed. & pause & exit /b 1)
+echo Installed. Open Seemless Browser from Start.
+pause
+exit /b 0
+# SEEMLESS_PAYLOAD
+'@
+    $body=[Convert]::ToBase64String([IO.File]::ReadAllBytes($Source),[Base64FormattingOptions]::InsertLineBreaks)
+    [IO.File]::WriteAllText($Destination,(($header -replace '\r?\n',"`r`n")+"`r`n"+$body),[Text.Encoding]::ASCII)
+}
+function Remove-SeemlessSession([string]$Folder) {
+    if(!$Folder -or [IO.Path]::GetFileName($Folder) -notmatch '^[a-f0-9]{32}$'){return}
+    try{if([IO.Directory]::Exists($Folder)){[IO.Directory]::Delete($Folder,$true)}}catch [IO.IOException]{}catch [UnauthorizedAccessException]{}
+}
 function Start-SeemlessBrowser {
+    param([switch]$Settings)
+    [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $version='1.0.3537.50'
     $cache=Join-Path $env:LOCALAPPDATA "N0VA\WebView2\$version"
     $arch=if([IntPtr]::Size -eq 4){'x86'}elseif($env:PROCESSOR_ARCHITECTURE -eq 'ARM64'){'arm64'}else{'x64'}
@@ -138,8 +178,7 @@ function Start-SeemlessBrowser {
     $forms=Join-Path $managed 'Microsoft.Web.WebView2.WinForms.dll'
     $native=Join-Path $cache "runtimes\win-$arch\native"
     if(!(Test-Path $core) -or !(Test-Path $forms) -or !(Test-Path (Join-Path $native 'WebView2Loader.dll'))){
-        Set-SeemlessStatus 'Downloading browser components...'
-        Show-SeemlessScreen
+        if(!$BrowserOnly){Set-SeemlessStatus 'Downloading browser components...';Show-SeemlessScreen}
         $stage=Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         try{
             [void][IO.Directory]::CreateDirectory($stage)
@@ -168,116 +207,290 @@ function Start-SeemlessBrowser {
         [void][Reflection.Assembly]::LoadFrom($core)
         [void][Reflection.Assembly]::LoadFrom($forms)
         [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::SetLoaderDllFolderPath($native)
-        Add-Type -ReferencedAssemblies @('System.dll','System.Drawing.dll','System.Windows.Forms.dll',$core,$forms) -TypeDefinition @'
+        Add-Type -ReferencedAssemblies @('System.dll','System.Core.dll','System.Xml.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll','System.Drawing.dll','System.Windows.Forms.dll',$core,$forms) -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Xml;
+
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
+public sealed class SeemlessPreferences {
+    public int Mode = 0;
+    public string[] Endpoints = new string[0];
+    public string Last = "";
+    public bool Block = true;
+    public bool Private = true;
+    public static string Endpoint(string value) {
+        Uri url;
+        if(!Regex.IsMatch(value,@"\A(?:https?|socks5)://(?:\[[a-fA-F0-9:]+\]|[a-zA-Z0-9.-]+):[0-9]{1,5}/?\z",RegexOptions.IgnoreCase)
+            || !Uri.TryCreate(value,UriKind.Absolute,out url) || url.Port < 1)
+            throw new FormatException("Enter one http://, https:// or socks5:// host and port per line.");
+        return url.Scheme+"://"+url.Host+":"+url.Port;
+    }
+    public string Route() {
+        if(Mode==0) return "";
+        if(Mode==1) return "socks5://10.64.0.1:1080";
+        if(Mode!=2 && Mode!=3) throw new FormatException("Choose a connection.");
+        var pool=(Endpoints??new string[0]).Select(Endpoint).Distinct().ToArray();
+        if(pool.Length==0) throw new FormatException("Add a proxy endpoint first.");
+        if(Mode==2 || pool.Length==1) return pool[0];
+        var choices=pool.Where(x=>x!=Last).ToArray();
+        return choices[new Random(Guid.NewGuid().GetHashCode()).Next(choices.Length)];
+    }
+    public static SeemlessPreferences Load(string path,string legacy,bool existing) {
+        if(!File.Exists(path)) return new SeemlessPreferences {Private=!existing, Mode=String.IsNullOrEmpty(legacy)?0:2,
+            Endpoints=String.IsNullOrEmpty(legacy)?new string[0]:new[]{Endpoint(legacy)}};
+        var doc=new XmlDocument();doc.XmlResolver=null;
+        using(var xml=XmlReader.Create(path,new XmlReaderSettings { DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,MaxCharactersInDocument=32768 }))doc.Load(xml);
+        var node=doc.DocumentElement;
+        if(node==null || node.Name!="browser")throw new InvalidDataException("Invalid browser settings.");
+        var p=new SeemlessPreferences {Mode=Int32.Parse(node.GetAttribute("mode")),Last=node.GetAttribute("last"),
+            Block=XmlConvert.ToBoolean(node.GetAttribute("block")),Private=XmlConvert.ToBoolean(node.GetAttribute("private"))};
+        p.Endpoints=node.SelectNodes("endpoint").Cast<XmlNode>().Select(x=>Endpoint(x.InnerText)).ToArray();
+        if(p.Mode<0 || p.Mode>3 || p.Endpoints.Length>32)throw new InvalidDataException("Invalid connection settings.");
+        return p;
+    }
+    public void Save(string path) {
+        var tmp=path+"."+Guid.NewGuid().ToString("N");
+        try {
+            using(var xml=XmlWriter.Create(tmp,new XmlWriterSettings{Indent=true})){
+                xml.WriteStartElement("browser");xml.WriteAttributeString("mode",XmlConvert.ToString(Mode));
+                xml.WriteAttributeString("last",Last);xml.WriteAttributeString("private",XmlConvert.ToString(Private));
+                xml.WriteAttributeString("block",XmlConvert.ToString(Block));
+                foreach(var host in Endpoints)xml.WriteElementString("endpoint",host);
+                xml.WriteEndElement();
+            }
+            if(File.Exists(path)) File.Replace(tmp,path,null); else File.Move(tmp,path);
+        } finally { if(File.Exists(tmp)) File.Delete(tmp); }
+    }
+}
+
 public sealed class SeemlessBrowser : Form {
+    sealed class SiteTab : TabPage {
+        public WebView2 View = new WebView2();
+        public Uri Pending;
+        public bool Ready, Loading;
+        public SiteTab(Uri url) : base("New tab") { Pending=url; View.Dock=DockStyle.Fill; Controls.Add(View); }
+    }
     readonly TabControl tabs = new TabControl();
-    readonly ToolStripTextBox address = new ToolStripTextBox();
     readonly ToolStrip bar = new ToolStrip();
-    readonly ToolStripButton back, forward;
-    readonly string profile, proxy;
-    WebView2 ActiveView {
-        get { return tabs.SelectedTab == null ? null : tabs.SelectedTab.Tag as WebView2; }
+    readonly ToolStripTextBox address = new ToolStripTextBox();
+    readonly ToolStripButton back,forward,reload;
+    readonly StatusStrip status = new StatusStrip();
+    readonly ToolStripStatusLabel state = new ToolStripStatusLabel();
+    readonly string root, config, session, route;
+    readonly bool disposableProfile, blocking;
+    readonly Action install;
+    readonly Action<string> saveInstaller;
+    readonly SeemlessPreferences prefs;
+    Task<CoreWebView2Environment> environment;
+    Task blocker;
+    TabPage settings;
+    public string EphemeralDirectory { get { return disposableProfile?session:null; } }
+    public SeemlessBrowser(string root,string legacy,bool showSettings,Action install,Action<string> saveInstaller) {
+        this.root=root;this.install=install;this.saveInstaller=saveInstaller;Directory.CreateDirectory(root);
+        config=Path.Combine(root,"browser-settings.xml");
+        var regular=Path.Combine(root,"BrowserProfile");
+        prefs=SeemlessPreferences.Load(config,legacy,Directory.Exists(regular));
+        route=prefs.Route();disposableProfile=prefs.Private;blocking=prefs.Block;
+        session=disposableProfile?Path.Combine(root,"PrivateSessions",Guid.NewGuid().ToString("N")):regular;
+        if(prefs.Mode==3){prefs.Last=route;prefs.Save(config);}
+        Text="Seemless Browser";Width=1100;Height=750;MinimumSize=new Size(650,450);
+        StartPosition=FormStartPosition.CenterScreen;Font=new Font("Segoe UI",10);
+        tabs.Dock=DockStyle.Fill;tabs.ShowToolTips=true;Controls.Add(tabs);
+        bar.GripStyle=ToolStripGripStyle.Hidden;bar.Padding=new Padding(6,5,6,5);
+        bar.BackColor=Color.FromArgb(24,34,45);bar.ForeColor=Color.WhiteSmoke;
+        back=Button("Back",delegate { if(Current!=null && Current.View.CanGoBack) Current.View.GoBack(); });
+        forward=Button("Forward",delegate { if(Current!=null && Current.View.CanGoForward) Current.View.GoForward(); });
+        reload=Button("Reload",delegate { if(Current!=null && Current.Ready) Current.View.Reload(); });
+        address.AutoSize=false;address.AccessibleName="Search or enter an address";address.ToolTipText=address.AccessibleName;
+        address.KeyDown+=(s,e)=>{if(e.KeyCode==Keys.Enter){e.SuppressKeyPress=true;NavigateInput();}};
+        bar.Items.Add(address);Button("+ Tab",delegate{OpenTab(null);});Button("Close tab",delegate{CloseTab();});Button("Settings",delegate{OpenSettings();});
+        Controls.Add(bar);status.Items.Add(state);Controls.Add(status);
+        SizeChanged+=delegate{Fit();};tabs.SelectedIndexChanged+=delegate{Sync();};
+        tabs.MouseUp+=(s,e)=>{if(e.Button==MouseButtons.Middle) for(int i=0;i<tabs.TabCount;i++)
+            if(tabs.GetTabRect(i).Contains(e.Location)){tabs.SelectedIndex=i;CloseTab();break;}};
+        Shown+=delegate{Fit();if(showSettings)OpenSettings();else OpenTab(null);};
     }
-    public SeemlessBrowser(string profile, string proxy) {
-        this.profile = profile; this.proxy = proxy;
-        Text = "Seemless Browser"; Width = 1100; Height = 750;
-        StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(580, 400);
-        tabs.Dock = DockStyle.Fill; Controls.Add(tabs);
-        bar.GripStyle = ToolStripGripStyle.Hidden;
-        bar.BackColor = Color.FromArgb(25,36,48); bar.ForeColor = Color.WhiteSmoke;
-        bar.Padding = new Padding(6,5,6,5);
-        back = Button("Back", delegate { if(ActiveView != null && ActiveView.CanGoBack) ActiveView.GoBack(); });
-        forward = Button("Forward", delegate { if(ActiveView != null && ActiveView.CanGoForward) ActiveView.GoForward(); });
-        Button("Reload", delegate { if(ActiveView != null && ActiveView.CoreWebView2 != null) ActiveView.Reload(); });
-        address.AutoSize = false;
-        address.ToolTipText = "Search or enter an address"; address.AccessibleName = address.ToolTipText;
-        address.KeyDown += (s,e) => {
-            if(e.KeyCode != Keys.Enter || ActiveView == null) return;
-            e.SuppressKeyPress = true;
-            var url = Destination(address.Text); if(url != null) ActiveView.Source = url;
-        };
-        bar.Items.Add(address);
-        Button("+ Tab", delegate { OpenTab(null); });
-        Button("Close tab", delegate { CloseTab(); });
-        Controls.Add(bar);
-        SizeChanged += delegate { address.Width = Math.Max(120, ClientSize.Width-370); };
-        tabs.SelectedIndexChanged += delegate { Sync(); };
-        Shown += delegate { address.Width=Math.Max(120, ClientSize.Width-370); OpenTab(null); };
-    }
-    ToolStripButton Button(string label, EventHandler action) {
-        var button = new ToolStripButton(label); button.Click += action; bar.Items.Add(button); return button;
-    }
+    SiteTab Current {get{return tabs.SelectedTab as SiteTab;}}
+    void Fit(){address.Width=Math.Max(140,ClientSize.Width-460);}
+    ToolStripButton Button(string name,EventHandler run){var b=new ToolStripButton(name);b.Click+=run;bar.Items.Add(b);return b;}
     static Uri Destination(string input) {
-        string text = (input ?? "").Trim(); if(text.Length==0) return null;
-        Uri u;
-        if(Uri.TryCreate(text, UriKind.Absolute, out u) && (u.Scheme=="http" || u.Scheme=="https")) return u;
-        if(text.IndexOfAny(new[]{' ','\t'}) < 0 && Uri.TryCreate("https://"+text,UriKind.Absolute,out u)
-            && (u.Host.Contains(".") || u.IsLoopback)) return u;
+        string text=(input??"").Trim();if(text.Length==0)return null;Uri u;
+        if(Uri.TryCreate(text,UriKind.Absolute,out u) && (u.Scheme=="http" || u.Scheme=="https"))return u;
+        if(text.IndexOfAny(new[]{' ','\t'})<0 && Uri.TryCreate("https://"+text,UriKind.Absolute,out u) && (u.Host.Contains(".")||u.IsLoopback))return u;
         return new Uri("https://duckduckgo.com/?q="+Uri.EscapeDataString(text));
     }
-    void Sync() {
-        var view = ActiveView;
-        var uri = view == null ? null : view.Source;
-        address.Text = uri == null || uri.AbsoluteUri=="about:blank" ? "" : uri.AbsoluteUri;
-        back.Enabled = view != null && view.CoreWebView2 != null && view.CanGoBack;
-        forward.Enabled = view != null && view.CoreWebView2 != null && view.CanGoForward;
+    void NavigateInput(){
+        var tab=Current;var url=Destination(address.Text);if(tab==null || url==null)return;
+        tab.Pending=url;if(tab.Ready)tab.View.CoreWebView2.Navigate(url.AbsoluteUri);
     }
-    protected override bool ProcessCmdKey(ref Message msg, Keys key) {
-        if(key==(Keys.Control|Keys.L)){ address.Focus(); address.SelectAll(); return true; }
-        if(key==(Keys.Control|Keys.T)){ OpenTab(null); return true; }
-        if(key==(Keys.Control|Keys.W)){ CloseTab(); return true; }
+    void Sync() {
+        var t=Current;var core=t==null || !t.Ready?null:t.View.CoreWebView2;
+        address.Enabled=t!=null;
+        if(!address.Focused){var url=core==null?(t==null?null:t.Pending):t.View.Source;
+            address.Text=url==null || url.AbsoluteUri=="about:blank"?"":url.AbsoluteUri;}
+        back.Enabled=core!=null && core.CanGoBack; forward.Enabled=core!=null && core.CanGoForward; reload.Enabled=core!=null;
+        state.Text=(disposableProfile?"Private session":"Saved session")+"    |    "+(route==""?"System connection":route)+"    |    "+
+            (!blocking?"Content blocking off":blocker!=null && blocker.Status==TaskStatus.RanToCompletion?"uBlock Origin Lite active":"uBlock Origin Lite pending");
+        Text=t==null?"Settings - Seemless Browser":t.Text.Replace("&&","&")+" - Seemless Browser";
+    }
+    protected override bool ProcessCmdKey(ref Message msg,Keys key) {
+        if(key==(Keys.Control|Keys.L) && Current!=null){address.Focus();address.SelectAll();return true;}
+        if(key==(Keys.Control|Keys.T)){OpenTab(null);return true;}
+        if(key==(Keys.Control|Keys.W)){CloseTab();return true;}
         return base.ProcessCmdKey(ref msg,key);
     }
     void CloseTab() {
         if(tabs.TabCount<=1){Close();return;}
-        var page=tabs.SelectedTab; tabs.TabPages.Remove(page); page.Dispose(); Sync();
+        var t=tabs.SelectedTab;if(t==settings)settings=null;tabs.TabPages.Remove(t);t.Dispose();Sync();
     }
-    void OpenTab(Uri first) {
-        var page=new TabPage("New tab");
-        var view=new WebView2(); view.Dock=DockStyle.Fill;
-        var properties=new CoreWebView2CreationProperties(); properties.UserDataFolder=profile;
-        if(!String.IsNullOrEmpty(proxy)) properties.AdditionalBrowserArguments="--proxy-server="+proxy;
-        view.CreationProperties=properties;
-        page.Tag=view; page.Controls.Add(view); tabs.TabPages.Add(page); tabs.SelectedTab=page;
-        view.CoreWebView2InitializationCompleted += (s,e) => {
-            if(view.IsDisposed) return;
-            if(!e.IsSuccess) {
-                MessageBox.Show(this,e.InitializationException.Message,"WebView2",MessageBoxButtons.OK,MessageBoxIcon.Error);
-                return;
+    void LabelTab(SiteTab t) {
+        if(t.IsDisposed || !t.Ready)return;
+        var core=t.View.CoreWebView2;var u=t.View.Source;
+        var site=u==null?"":u.Host;var title=core.DocumentTitle;
+        if(String.IsNullOrWhiteSpace(title) || title=="about:blank")title=site.Length==0?"New tab":site;
+        string label=title.Substring(0,Math.Min(title.Length,25));
+        t.Text=((t.Loading?"... ":"")+(core.IsDocumentPlayingAudio?"[Audio] ":"")+label).Replace("&","&&");
+        t.ToolTipText=title+Environment.NewLine+(u==null?"":u.AbsoluteUri);
+        if(t==Current)Sync();
+    }
+    async void OpenTab(Uri first) {
+        var t=new SiteTab(first);tabs.TabPages.Add(t);tabs.SelectedTab=t;address.Focus();
+        try {
+            if(environment==null){
+                var options=new CoreWebView2EnvironmentOptions();
+                options.AreBrowserExtensionsEnabled=blocking;
+                options.EnableTrackingPrevention=true;
+                if(route!="")options.AdditionalBrowserArguments="--proxy-server="+route+" --force-webrtc-ip-handling-policy=disable_non_proxied_udp";
+                environment=CoreWebView2Environment.CreateAsync(null,session,options);
             }
-            var core=view.CoreWebView2;
-            core.DocumentTitleChanged += delegate {
-                var title=core.DocumentTitle;
-                if(String.IsNullOrWhiteSpace(title) || title=="about:blank") title="New tab";
-                page.Text=title.Substring(0,Math.Min(36,title.Length)).Replace("&","&&");
-            };
-            core.SourceChanged += delegate { if(ActiveView==view) Sync(); };
-            core.HistoryChanged += delegate { if(ActiveView==view) Sync(); };
-            core.NewWindowRequested += (sender,args) => {
-                args.Handled=true;
-                Uri url;
-                if(Uri.TryCreate(args.Uri,UriKind.Absolute,out url) && (url.Scheme=="https" || url.Scheme=="http"))
-                    BeginInvoke((Action)(() => OpenTab(url)));
-            };
+            var env=await environment;if(t.IsDisposed || IsDisposed)return;
+            await t.View.EnsureCoreWebView2Async(env);
+            if(t.IsDisposed || IsDisposed)return;
+            var core=t.View.CoreWebView2;
+            core.Profile.PreferredTrackingPreventionLevel=CoreWebView2TrackingPreventionLevel.Strict;
+            core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;
+            core.Settings.AreHostObjectsAllowed=false;core.Settings.IsWebMessageEnabled=false;
+            if(blocking){
+                if(blocker==null)blocker=EnableBlocker(core.Profile);
+                await blocker;
+            }
+            if(t.IsDisposed || IsDisposed)return;
+            t.Ready=true;
+            core.DocumentTitleChanged+=delegate{LabelTab(t);};core.IsDocumentPlayingAudioChanged+=delegate{LabelTab(t);};
+            core.SourceChanged+=delegate{LabelTab(t);};core.HistoryChanged+=delegate{if(Current==t)Sync();};
+            core.NavigationStarting+=(sender,e)=>{t.Loading=true;LabelTab(t);};
+            core.NavigationCompleted+=(sender,e)=>{t.Loading=false;LabelTab(t);
+                if(!e.IsSuccess && Current==t && e.WebErrorStatus!=CoreWebView2WebErrorStatus.OperationCanceled)state.Text="Page load failed: "+e.WebErrorStatus;};
+            core.NewWindowRequested+=(sender,e)=>{e.Handled=true;Uri u;
+                if(Uri.TryCreate(e.Uri,UriKind.Absolute,out u) && (u.Scheme=="https"||u.Scheme=="http"))BeginInvoke((Action)(()=>OpenTab(u)));};
+            if(t.Pending!=null)core.Navigate(t.Pending.AbsoluteUri);LabelTab(t);
+        } catch(Exception e) {
+            if(t.IsDisposed || IsDisposed)return;
+            t.Text="Unavailable";t.Controls.Clear();t.View.Dispose();
+            t.Controls.Add(new Label{Dock=DockStyle.Fill,Padding=new Padding(18),Text="Browser setup failed. "+e.GetBaseException().Message+"\r\nOpen Settings to change startup options."});
+            if(environment!=null && environment.IsFaulted)environment=null;
+            if(blocker!=null && blocker.IsFaulted)blocker=null;
+            Sync();
+        }
+    }
+    const string UbolVersion="2026.1122.1948";
+    string PrepareBlocker() {
+        var folder=Path.Combine(root,"Extensions","uBOL-"+UbolVersion);
+        if(File.Exists(Path.Combine(folder,"manifest.json")))return folder;
+        Directory.CreateDirectory(Path.GetDirectoryName(folder));
+        var stage=folder+"-"+Guid.NewGuid().ToString("N");Directory.CreateDirectory(stage);
+        try {
+            var package=Path.Combine(stage,"package.zip");var contents=Path.Combine(stage,"unpacked");
+            using(var client=new WebClient()){
+                client.Headers["User-Agent"]="SeemlessBrowser/2.2";
+                client.DownloadFile("https://github.com/uBlockOrigin/uBOL-home/releases/download/"+UbolVersion+"/uBOLite_"+UbolVersion+".edge.zip",package);
+            }
+            using(var hash=SHA256.Create())using(var file=File.OpenRead(package)){
+                string digest=BitConverter.ToString(hash.ComputeHash(file)).Replace("-","");
+                if(!digest.Equals("7617e0b164552b280043a84c24dc85178eed274f7941da91b1325d4f2aca535c",StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The blocker download could not be verified.");
+            }
+            ZipFile.ExtractToDirectory(package,contents);Directory.Move(contents,folder);return folder;
+        }finally{if(Directory.Exists(stage))Directory.Delete(stage,true);}
+    }
+    async Task EnableBlocker(CoreWebView2Profile profile) {
+        string path=await Task.Run((Func<string>)PrepareBlocker);
+        var ext=await profile.AddBrowserExtensionAsync(path);
+        if(!ext.IsEnabled)await ext.EnableAsync(true);
+    }
+    static Label Caption(string text){return new Label{Text=text,AutoSize=true,Margin=new Padding(0,10,0,4)};}
+    void OpenSettings(){
+        if(settings!=null){tabs.SelectedTab=settings;return;}
+        settings=new TabPage("Settings");tabs.TabPages.Add(settings);tabs.SelectedTab=settings;
+        var wrap=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Color.FromArgb(242,245,247)};settings.Controls.Add(wrap);
+        var panel=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoSize=true,Padding=new Padding(20)};wrap.Controls.Add(panel);
+        panel.Controls.Add(Caption("Connection on browser start"));
+        var modes=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=380};
+        modes.Items.AddRange(new[]{"System connection / Windows VPN","Mullvad SOCKS5 (connect Mullvad VPN first)","First saved proxy","Random saved proxy each start"});
+        modes.SelectedIndex=prefs.Mode;panel.Controls.Add(modes);
+        panel.Controls.Add(Caption("Proxy endpoints - one per line, e.g. socks5://host:1080"));
+        var entries=new TextBox{Multiline=true,ScrollBars=ScrollBars.Vertical,Width=480,Height=70,MaxLength=8192,Lines=prefs.Endpoints};panel.Controls.Add(entries);
+        var shield=new CheckBox{Text="uBlock Origin Lite",Checked=prefs.Block,AutoSize=true};
+        var temporary=new CheckBox{Text="Temporary browsing profile",Checked=prefs.Private,AutoSize=true};
+        panel.Controls.Add(shield);panel.Controls.Add(temporary);
+        var save=new Button{Text="Save settings",AutoSize=true};panel.Controls.Add(save);
+        var result=Caption("");panel.Controls.Add(result);
+        save.Click+=delegate{
+            try {
+                var endpoints=entries.Lines.Select(x=>x.Trim()).Where(x=>x.Length>0).Select(SeemlessPreferences.Endpoint).Distinct().ToArray();
+                if(endpoints.Length>32)throw new FormatException("Use up to 32 endpoints.");
+                var updated=new SeemlessPreferences{Mode=modes.SelectedIndex,Endpoints=endpoints,Last=prefs.Last,Block=shield.Checked,Private=temporary.Checked};
+                updated.Route();updated.Save(config);prefs.Mode=updated.Mode;prefs.Endpoints=endpoints;prefs.Block=updated.Block;prefs.Private=updated.Private;
+                result.Text="Saved. Changes apply on the next browser start.";
+            }catch(Exception e){result.Text=e.GetBaseException().Message;}
         };
-        view.Source=first ?? new Uri("about:blank"); address.Focus();
+        panel.Controls.Add(Caption("Standalone browser"));
+        var actions=new FlowLayoutPanel{AutoSize=true};
+        var here=new Button{Text="Install on this PC",AutoSize=true};var download=new Button{Text="Save installer...",AutoSize=true};
+        actions.Controls.Add(here);actions.Controls.Add(download);panel.Controls.Add(actions);
+        here.Click+=delegate{try{install();result.Text="Installed in your Start menu.";}catch(Exception e){result.Text=e.GetBaseException().Message;}};
+        download.Click+=delegate{
+            using(var dialog=new SaveFileDialog{FileName="SeemlessBrowser-Setup.cmd",Filter="Windows installer (*.cmd)|*.cmd"}){
+                if(dialog.ShowDialog(this)!=DialogResult.OK)return;
+                try{saveInstaller(dialog.FileName);result.Text="Installer saved.";}catch(Exception e){result.Text=e.GetBaseException().Message;}
+            }
+        };
+        Sync();
     }
 }
 '@
     }
     try{[void][Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString($null)}
     catch{throw 'Install Microsoft Edge WebView2 Runtime, then open Browser again.'}
-    $proxy=Get-SeemlessProxy
-    $window=New-Object SeemlessBrowser((Join-Path $env:LOCALAPPDATA 'N0VA\BrowserProfile'),$proxy)
-    try{Set-SeemlessStatus '';[void]$window.ShowDialog()}finally{$window.Dispose()}
+    $sourcePath=$script:DesktopSourcePath
+    if(!$sourcePath -or [IO.Path]::GetFileName($sourcePath) -ne 'SeemlessOS.ps1'){$sourcePath=Join-Path $InstallDir 'SeemlessOS.ps1'}
+    $root=Join-Path $env:LOCALAPPDATA 'N0VA'
+    $legacy=if(!(Test-Path -LiteralPath (Join-Path $root 'browser-settings.xml'))){Get-SeemlessProxy}else{''}
+    $mutex=New-Object Threading.Mutex($false, 'Local\N0VALID.SeemlessBrowser')
+    $locked=$false
+    try{
+        try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
+        if(!$locked){throw 'Seemless Browser is already open.'}
+        $sessions=Join-Path $root 'PrivateSessions'
+        if([IO.Directory]::Exists($sessions)){foreach($dir in [IO.Directory]::GetDirectories($sessions)){Remove-SeemlessSession $dir}}
+        $installAction=[Action]{Install-SeemlessBrowser $sourcePath}
+        $saveAction=[Action[string]]{param($path) Save-SeemlessInstaller $path $sourcePath}
+        $window=New-Object SeemlessBrowser($root,$legacy,[bool]$Settings,$installAction,$saveAction)
+        try{Set-SeemlessStatus '';[void]$window.ShowDialog()}
+        finally{$temporary=$window.EphemeralDirectory;$window.Dispose();Remove-SeemlessSession $temporary}
+    }finally{if($locked){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }
 function ConvertTo-SeemlessProxy {
     param([string]$Value)
@@ -337,7 +550,7 @@ $script:SeemlessState.InstallLog=@()
 $script:SeemlessState.SettingsCache=@{}
 $script:SeemlessState.SettingsScroll=0
 $script:SeemlessState.Theme='Ocean'
-$script:SeemlessControls=@(@{Name='This PC'},@{Name='Storage'},@{Name='Network'},@{Name='Running apps'},@{Name='Appearance'},@{Name='Browser proxy'})
+$script:SeemlessControls=@(@{Name='This PC'},@{Name='Storage'},@{Name='Network'},@{Name='Running apps'},@{Name='Appearance'},@{Name='Browser settings'})
 function Set-SeemlessTheme {
     param([string]$Name,[switch]$Save)
     switch($Name){
@@ -381,7 +594,7 @@ function Get-SeemlessSettingLines {
                 $lines.Add('APP                           MEMORY')
                 foreach($process in (Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 30)){$lines.Add(('{0,-28} {1,7:N0} MB' -f $process.ProcessName,($process.WorkingSet64/1MB)))}
             }
-            'Browser proxy' {$proxy=Get-SeemlessProxy;if(!$proxy){$proxy='System default'};$lines.Add($proxy);$lines.Add('Enter to change')}
+            'Browser settings' {$lines.Add('Connections, blocking, privacy and standalone installation.');$lines.Add('Enter to open settings.')}
             'Appearance' {$lines.Add('Current theme: '+$script:SeemlessState.Theme);$lines.Add('');$lines.Add('Enter changes theme: Ocean / Emerald / Violet')}
         }
         if(-not $lines.Count){$lines.Add('No information available on this PC.')}
@@ -558,7 +771,7 @@ function Show-SeemlessScreen {
         $screen.Fill($offset,$y,[Math]::Max(0,$g.W-$offset),1,$c.Ink,$c.Side)
     }
     $screen.Text(2,0,'N0VA  /  Seemless 0S MODE',$c.Accent,$c.Desktop)
-    $screen.Text([Math]::Max(2,$g.W-7),0,'v2.1',$c.Muted,$c.Desktop)
+    $screen.Text([Math]::Max(2,$g.W-7),0,'v2.2',$c.Muted,$c.Desktop)
     $screen.Fill(0,$g.H-3,$g.W,1,$c.Muted,$c.Side)
     $screen.Text(2,$g.H-3,(ConvertTo-SeemlessSafeText $st.Status),$c.Muted,$c.Side)
     $screen.Fill(0,$g.H-2,$g.W,2,$c.Ink,0x0A1326)
@@ -701,12 +914,6 @@ function Invoke-SeemlessPrompt {
     switch($prompt.Kind){
         'Location' {Update-SeemlessFiles $prompt.Value}
         'Search' {$st.AppQuery=$prompt.Value.Trim();$st.AppIndex=0}
-        'Proxy' {
-            $value=ConvertTo-SeemlessProxy $prompt.Value
-            [void][IO.Directory]::CreateDirectory($InstallDir)
-            [IO.File]::WriteAllText((Join-Path $InstallDir 'browser-proxy.txt'),$value)
-            $st.SettingsCache=@{};Set-SeemlessStatus 'Browser proxy saved.'
-        }
         'NewText' {New-SeemlessItem $prompt.Value}
         'NewFolder' {New-SeemlessItem $prompt.Value -Folder}
     }
@@ -784,8 +991,8 @@ function Invoke-SeemlessKey {
             $st.ControlIndex=[Math]::Max(0,[Math]::Min($script:SeemlessControls.Count-1,$st.ControlIndex+$delta))
             if($delta){$st.SettingsScroll=0}
             if($Key.Key -eq 'R'){$st.SettingsCache=@{}}
-            if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Browser proxy'){
-                Start-SeemlessPrompt Proxy 'Browser proxy' 'http://host:port, or leave blank for system default.' (Get-SeemlessProxy)
+            if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Browser settings'){
+                Start-SeemlessBrowser -Settings
             }
             if($Key.Key -eq 'PageDown'){$st.SettingsScroll += 5};if($Key.Key -eq 'PageUp'){$st.SettingsScroll=[Math]::Max(0,$st.SettingsScroll-5)}
             if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Appearance'){
@@ -838,4 +1045,11 @@ function Start-SeemlessOS {
         [Console]::Clear()
     }
 }
-if(-not $NoRun){Start-SeemlessOS}
+if($InstallBrowser){Install-SeemlessBrowser $PSCommandPath}
+elseif($BrowserOnly){
+    try{Start-SeemlessBrowser}catch{
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'Seemless Browser')
+        exit 1
+    }
+}elseif(-not $NoRun){Start-SeemlessOS}

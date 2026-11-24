@@ -13,9 +13,12 @@ color 0B
 set "N0VA_LAUNCHER=%~f0"
 set "N0VA_INTRO=1"
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
-set "N0VA_BUILD=2.1"
+set "N0VA_BUILD=2.2"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
-for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
+for /f "usebackq tokens=1,* delims=|" %%I in (`powershell.exe -NoProfile -Command "([guid]::NewGuid().ToString('N'))+'|'+[Environment]::GetFolderPath('Desktop')" 2^>nul`) do (
+    set "N0VA_RUN_ID=%%I"
+    if not "%%J"=="" set "DESKTOP_DIR=%%J"
+)
 set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
 set "N0VA_PAGE=1"
 
@@ -26,13 +29,15 @@ set "choice=%errorlevel%"
 set "N0VA_INTRO="
 set "N0VA_VIEW="
 if "%choice%"=="122" goto desktop_page_two
+if "%choice%"=="120" goto owner_fallback
+if "%choice%"=="25" goto sharing_fallback
 if "%choice%"=="250" goto menu_fallback
 if "%choice%"=="101" goto next_page
 if "%choice%"=="100" goto previous_page
 goto dispatch
 
 :menu_fallback
-echo N0VA - Made by N0VALID - v2.1 - Page %N0VA_PAGE% of 2
+echo N0VA - Made by N0VALID - v2.2 - Page %N0VA_PAGE% of 2
 if "%N0VA_PAGE%"=="1" (
     echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
@@ -43,9 +48,11 @@ if "%N0VA_PAGE%"=="1" (
     echo [18] VLC [19] Everything Search [20] PowerToys
     echo [22] Live performance [23] Recent app crashes [24] Connection check
 )
-echo [A] Previous page  [D] Next page  [0] Exit
-powershell.exe -NoProfile -Command "$v=Read-Host 'N0VA'; if($v -eq 'd'){exit 101}; if($v -eq 'a'){exit 100}; if($v -match '^[0-9]{1,2}$'){exit ([int]$v)}; exit 250"
+echo [25] Run sharing  [A] Previous page  [D] Next page  [0] Exit
+powershell.exe -NoProfile -Command "$v=Read-Host 'N0VA'; if($v -eq 'nnnn'){exit 120}; if($v -eq 'seemless'){exit 21}; if($v -eq 'd'){exit 101}; if($v -eq 'a'){exit 100}; if($v -match '^[0-9]{1,2}$'){exit ([int]$v)}; exit 250"
 set "choice=%errorlevel%"
+if "%choice%"=="120" goto owner_fallback
+if "%choice%"=="25" goto sharing_fallback
 if "%choice%"=="250" goto menu_fallback
 if "%choice%"=="101" goto next_page
 if "%choice%"=="100" goto previous_page
@@ -88,6 +95,17 @@ goto menu
 
 :previous_page
 set "N0VA_PAGE=1"
+goto menu
+
+:owner_fallback
+set "N0VA_VIEW=owner"
+goto fallback_action
+
+:sharing_fallback
+set "N0VA_VIEW=sharing"
+:fallback_action
+powershell.exe -NoProfile -Command "$text=[IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker='# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker)+$marker.Length))) } catch { Write-Host $_.Exception.Message; exit 1 }"
+if errorlevel 1 pause
 goto menu
 
 :diagnostic
@@ -133,16 +151,31 @@ goto complete_download
 :computer
 call :download "cmptr_info.pyw"
 if errorlevel 1 goto failed
-start "" "%INSTALL_DIR%\cmptr_info.pyw" >nul 2>&1
+call :run_python_gui "cmptr_info.pyw"
 if errorlevel 1 goto failed
 goto complete_download
 
 :explorer
 call :download "Python_Command_Explorer_Pro.pyw"
 if errorlevel 1 goto failed
-start "" "%INSTALL_DIR%\Python_Command_Explorer_Pro.pyw" >nul 2>&1
+call :run_python_gui "Python_Command_Explorer_Pro.pyw"
 if errorlevel 1 goto failed
 goto complete_download
+
+:run_python_gui
+where pyw.exe >nul 2>&1
+if not errorlevel 1 (
+    start "" pyw.exe -3 "%INSTALL_DIR%\%~1"
+    exit /b
+)
+where pythonw.exe >nul 2>&1
+if not errorlevel 1 (
+    start "" pythonw.exe "%INSTALL_DIR%\%~1"
+    exit /b
+)
+echo Python is required. Choose option 1 to install it.
+pause
+exit /b 1
 
 :winutil
 cls
@@ -405,9 +438,9 @@ public static class NovaDisplay {
         "NN  NNN  00  00     VVV     AAAAAAA ",
         "NN   NN   0000       V      AA   AA " };
     public static string[] Logo { get { return logo; } }
-    public static void Intro(bool admin, bool color) {
+    public static ConsoleKeyInfo? Intro(bool admin, bool color) {
         int w=Console.WindowWidth-1, h=Console.WindowHeight;
-        if(w<15 || h<8)return;
+        if(w<15 || h<8)return null;
         var rng=new Random();
         var start=new int[w]; var speed=new int[w]; var length=new int[w];
         for(int x=0;x<w;x++) { start[x]=rng.Next(h+22); speed[x]=rng.Next(12,34); length[x]=rng.Next(5,17); }
@@ -419,7 +452,7 @@ public static class NovaDisplay {
         var timer=Stopwatch.StartNew(); var frame=new StringBuilder();
         int duration=admin?690:3050;
         while(timer.ElapsedMilliseconds<duration && Console.WindowWidth-1==w && Console.WindowHeight==h) {
-            if(!admin && Console.KeyAvailable) { Console.ReadKey(true); break; }
+            if(!admin && Console.KeyAvailable) return Console.ReadKey(true);
             int ms=(int)timer.ElapsedMilliseconds, tick=ms/65;
             double progress=Math.Max(0,Math.Min(1,(ms-(admin?60:1740))/(admin?320.0:610.0)));
             frame.Clear(); int last=-1;
@@ -454,10 +487,179 @@ public static class NovaDisplay {
             if(color)frame.Append("\x1b[0m");
             Console.SetCursorPosition(0,Console.WindowTop);Console.Write(frame.ToString());Thread.Sleep(32);
         }
+        return null;
     }
 }
 '@
 }
+# Shared history is off until this Windows profile chooses a name and opts in.
+$script:ActivityUrl='https://n0valid-n0va-runs.deftdisc2.chatgpt.site/api'
+$script:ActivityRoot=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'N0VA'
+$script:SharingFile=Join-Path $ActivityRoot 'sharing.json'
+$script:OwnerFile=Join-Path $ActivityRoot 'owner.dpapi'
+$script:OwnerSummary=$null
+$script:HistoryStatus=''
+$script:RunSend=$null
+$script:Sharing=$null
+try {
+    if([IO.File]::Exists($SharingFile)){
+        $script:Sharing=[IO.File]::ReadAllText($SharingFile)|ConvertFrom-Json
+    }
+} catch { $script:HistoryStatus='Sharing settings unreadable' }
+
+function Set-NovaPrivateFile([string]$Path,[string]$Value) {
+    [void][IO.Directory]::CreateDirectory($ActivityRoot)
+    $tmp=$Path+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+    try {
+        [IO.File]::WriteAllText($tmp,$Value)
+        if([IO.File]::Exists($Path)){[IO.File]::Replace($tmp,$Path,[System.Management.Automation.Language.NullString]::Value)}
+        else{[IO.File]::Move($tmp,$Path)}
+    }finally{if([IO.File]::Exists($tmp)){[IO.File]::Delete($tmp)}}
+}
+function Protect-NovaKey([string]$Value) {
+    return (ConvertTo-SecureString $Value -AsPlainText -Force | ConvertFrom-SecureString)
+}
+function Read-NovaKey([string]$Value) {
+    $secure=ConvertTo-SecureString $Value
+    try{return (New-Object Net.NetworkCredential('', $secure)).Password}finally{$secure.Dispose()}
+}
+function Get-NovaOwnerData([string]$View,[int]$Page,[string]$Key) {
+    if(!$Key){$Key=Read-NovaKey ([IO.File]::ReadAllText($OwnerFile))}
+    [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $data=Invoke-RestMethod -UserAgent "N0VA/$env:N0VA_BUILD" -Uri "$ActivityUrl/history?view=$View&page=$Page" -Method Get -Headers @{Authorization="Bearer $Key"} -MaximumRedirection 0 -TimeoutSec 8 -ErrorAction Stop
+    if($null -eq $data.summary.runs){throw 'The activity service returned an unexpected response.'}
+    $script:OwnerSummary=$data.summary
+    $script:HistoryStatus=''
+    return $data
+}
+function Connect-NovaOwner {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog=New-Object Windows.Forms.OpenFileDialog
+    try{
+        $dialog.Title='Pair this PC with your N0VA owner key'
+        $dialog.Filter='N0VA owner key (*.key)|*.key|All files (*.*)|*.*'
+        $dialog.InitialDirectory=Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
+        if($dialog.ShowDialog() -ne 'OK'){return $false}
+        $file=Get-Item -LiteralPath $dialog.FileName
+        if($file.Length -gt 256){throw 'Choose your N0VA-owner.key file.'}
+        $key=[IO.File]::ReadAllText($file.FullName).Trim()
+        if($key -cnotmatch '^nova-owner-[0-9a-f]{64}$'){throw 'Choose your N0VA-owner.key file.'}
+        [void](Get-NovaOwnerData 'recent' 1 $key)
+        Set-NovaPrivateFile $OwnerFile (Protect-NovaKey $key)
+        return $true
+    }finally{$dialog.Dispose()}
+}
+function Format-NovaSeen([long]$Milliseconds) {
+    return ([datetimeoffset]::FromUnixTimeMilliseconds($Milliseconds).LocalDateTime.ToString('MMM d, h:mm tt',[Globalization.CultureInfo]::InvariantCulture))
+}
+function Show-NovaHistory([string]$View) {
+    if(![IO.File]::Exists($OwnerFile)){if(!(Connect-NovaOwner)){return}}
+    $page=1
+    while($true){
+        [Console]::Clear()
+        $title=switch($View){'profiles'{'User directory'} 'builds'{'Builds in use'} default{'Run history'}}
+        Write-Host ("owner M3NU  /  "+$title) -ForegroundColor Yellow
+        $data=Get-NovaOwnerData $View $page
+        Write-Host ("{0} launches   {1} profiles   {2} in 24h   |   Last 90 days" -f $data.summary.runs,$data.summary.profiles,$data.summary.last24h)
+        Write-Host ''
+        if(!$data.rows.Count){Write-Host 'No shared launches on this page.'}
+        elseif($View -eq 'recent'){
+            Write-Host ('{0,-24}  {1,-18}  {2}' -f 'Display name','Launch time','Build') -ForegroundColor Cyan
+            foreach($row in $data.rows){Write-Host ('{0,-24}  {1,-18}  v{2}' -f $row.name,(Format-NovaSeen $row.seen),$row.build)}
+        }elseif($View -eq 'builds'){
+            Write-Host ('{0,-12} {1,6} {2,9}   {3}' -f 'Build','Runs','Profiles','Last seen') -ForegroundColor Cyan
+            foreach($row in $data.rows){Write-Host ('v{0,-11} {1,6} {2,9}   {3}' -f $row.build,$row.runs,$row.profiles,(Format-NovaSeen $row.lastSeen))}
+        }else{
+            $wide=[Console]::WindowWidth -ge 76
+            if($wide){Write-Host ('{0,-24} {1,5}  {2,-17} {3,-17} {4}' -f 'Display name','Runs','First seen','Last seen','Build') -ForegroundColor Cyan}
+            foreach($row in $data.rows){
+                $first=Format-NovaSeen $row.firstSeen;$last=Format-NovaSeen $row.lastSeen
+                if($wide){Write-Host ('{0,-24} {1,5}  {2,-17} {3,-17} v{4}' -f $row.name,$row.runs,$first,$last,$row.build)}
+                else{Write-Host ("{0}   {1} runs   v{2}" -f $row.name,$row.runs,$row.build);Write-Host ("  First {0}  /  Last {1}" -f $first,$last)}
+            }
+        }
+        $actions=@("Page $page",'R Refresh','Esc Back')
+        if($page -gt 1){$actions+='A Previous'};if($data.more){$actions+='D Next'}
+        Write-Host ("`n"+($actions -join '   ')) -ForegroundColor Yellow
+        do{$key=[Console]::ReadKey($true).Key}while($key -notin @('R','Escape') -and !($key -in @('A','LeftArrow') -and $page -gt 1) -and !($key -in @('D','RightArrow') -and $data.more))
+        if($key -eq 'Escape'){return}
+        if($key -in @('A','LeftArrow')){$page--}
+        if($key -in @('D','RightArrow')){$page++}
+    }
+}
+function Send-NovaLaunch {
+    if(!$Sharing -or $script:RunSend){return}
+    Add-Type -AssemblyName System.Net.Http
+    [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $handler=New-Object Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect=$false
+    $client=New-Object Net.Http.HttpClient($handler)
+    $client.Timeout=[timespan]::FromSeconds(6)
+    $client.DefaultRequestHeaders.UserAgent.ParseAdd("N0VA/$env:N0VA_BUILD")
+    $request=$null
+    try {
+        $token=Read-NovaKey $Sharing.token
+        $id=$env:N0VA_RUN_ID
+        if(!$id){$id=[guid]::NewGuid().ToString('N');$env:N0VA_RUN_ID=$id}
+        $body=@{name=$Sharing.name;launch=$id;build=$env:N0VA_BUILD}|ConvertTo-Json -Compress
+        $request=New-Object Net.Http.HttpRequestMessage([Net.Http.HttpMethod]::Post, "$ActivityUrl/launch")
+        $request.Headers.Authorization=New-Object Net.Http.Headers.AuthenticationHeaderValue('Bearer',$token)
+        $request.Content=New-Object Net.Http.StringContent($body,[Text.Encoding]::UTF8,'application/json')
+        $script:RunSend=@{client=$client;request=$request;task=$client.SendAsync($request)}
+    }catch{if($request){$request.Dispose()};$client.Dispose();throw}
+}
+function Complete-NovaLaunch([switch]$Wait) {
+    if(!$RunSend){return}
+    $job=$RunSend
+    if(!$Wait -and !$job.task.IsCompleted){return}
+    try{
+        $reply=$job.task.GetAwaiter().GetResult()
+        try{if(!$reply.IsSuccessStatusCode){throw 'Check-in rejected.'};$script:HistoryStatus='Launch received'}
+        finally{$reply.Dispose()}
+    }catch{$script:HistoryStatus='Launch could not be shared'}
+    finally{$job.request.Dispose();$job.client.Dispose();$script:RunSend=$null}
+}
+function Show-NovaSharing {
+    [Console]::Clear()
+    Write-Host 'Run sharing' -ForegroundColor Cyan
+    Write-Host 'Share a display name, launch time and N0VA version with N0VALID.'
+    Write-Host 'A random profile ID groups your launches. History covers 90 days.'
+    Write-Host ''
+    if($Sharing){
+        Complete-NovaLaunch -Wait
+        Write-Host ('On  /  '+$Sharing.name)
+        if($HistoryStatus){Write-Host $HistoryStatus}
+        Write-Host 'T  Turn off    D  Erase my history    R  Retry    Esc  Back'
+        $key=[Console]::ReadKey($true).Key
+        if($key -eq 'T'){[IO.File]::Delete($SharingFile);$script:Sharing=$null;$script:HistoryStatus=''}
+        if($key -eq 'D'){
+            Write-Host 'Erase this profile''s shared history and turn sharing off?  Y / N'
+            if([Console]::ReadKey($true).Key -eq 'Y'){
+                $token=Read-NovaKey $Sharing.token
+                [void](Invoke-RestMethod -Method Delete -UserAgent "N0VA/$env:N0VA_BUILD" -Uri "$ActivityUrl/profile" -Headers @{Authorization="Bearer $token"} -MaximumRedirection 0 -TimeoutSec 8 -ErrorAction Stop)
+                [IO.File]::Delete($SharingFile);$script:Sharing=$null;$script:OwnerSummary=$null;$script:HistoryStatus=''
+            }
+        }
+        if($key -eq 'R'){Send-NovaLaunch;Complete-NovaLaunch -Wait;Write-Host $HistoryStatus;[void][Console]::ReadKey($true)}
+        return
+    }
+    Write-Host 'Enter  Choose a name and turn on    Esc  Back'
+    if([Console]::ReadKey($true).Key -ne 'Enter'){return}
+    [Console]::CursorVisible=$true
+    try{$name=(Read-Host 'Display name').Trim()}finally{[Console]::CursorVisible=$false}
+    if(!$name){return}
+    if($name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9 _.-]{0,23}$'){throw 'Use 1-24 letters, numbers, spaces, dots, dashes or underscores.'}
+    [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $enroll=Invoke-RestMethod -Method Post -UserAgent "N0VA/$env:N0VA_BUILD" -Uri "$ActivityUrl/enroll" -Headers @{'X-Nova-Consent'='share-launches'} -MaximumRedirection 0 -TimeoutSec 8 -ErrorAction Stop
+    if($enroll.token -cnotmatch '^[0-9a-f]{32}\.[0-9a-f]{64}$'){throw 'Could not enable run sharing.'}
+    $settings=@{name=$name;token=(Protect-NovaKey $enroll.token)}
+    Set-NovaPrivateFile $SharingFile ($settings|ConvertTo-Json -Compress)
+    $script:Sharing=$settings
+    Send-NovaLaunch;Complete-NovaLaunch -Wait
+    Write-Host $HistoryStatus
+    Write-Host 'Press a key to return.';[void][Console]::ReadKey($true)
+}
+
 $color = [NovaDisplay]::UseColor()
 $access='Standard user'
 try {
@@ -475,8 +677,8 @@ $pages = @{
         '10  Install Brave','11  Install Steam','13  Install RustDesk')
     '2' = @('14  7-Zip','15  Notepad++','16  VS Code','17  Git','18  VLC',
         '19  Everything Search','20  PowerToys','22  Live performance','23  Recent app crashes','24  Connection check')
-    'admin' = @('01  Live performance','02  Recent app crashes','03  Connection check',
-        '04  Event Viewer','05  Services','06  Task Manager')
+    'admin' = @('07  Run history','08  User directory','10  Builds in use','09  Pair owner key','01  Live performance',
+        '02  Recent app crashes','03  Connection check','04  Event Viewer','05  Services','06  Task Manager')
 }
 function New-NovaFrame {
     param([string]$Page,[int]$Width,[int]$Height)
@@ -501,9 +703,17 @@ function New-NovaFrame {
     $title = switch($Page){'1'{'N0VA  /  Tools'} '2'{'N0VA  /  Downloads & diagnostics'} 'admin'{'owner M3NU'}}
     Add-Row $title $accent
     Add-Row ('-' * $span) $dim
-    if($admin){Add-Row ([Environment]::MachineName+'  /  '+$access) $secondary}
+    if($admin){
+        Add-Row ('N0VALID/N0VA   /   v'+$env:N0VA_BUILD) $secondary
+        if($OwnerSummary){Add-Row ('{0} profiles   {1} launches   {2} in 24h' -f $OwnerSummary.profiles,$OwnerSummary.runs,$OwnerSummary.last24h) $white}
+        elseif([IO.File]::Exists($OwnerFile)){
+            $label=if($HistoryStatus -like 'History unavailable*'){$HistoryStatus}else{'Owner key saved   /   Loading activity'}
+            Add-Row $label $white
+        }
+        else{Add-Row 'Private history   /   09  Pair this PC' $white}
+    }
     $items = $pages[$Page]
-    $split = switch($Page){'1'{7} '2'{7} 'admin'{3}}
+    $split = switch($Page){'1'{7} '2'{7} 'admin'{5}}
     # Shorten only the narrow layout, keeping both the numbers and labels visible.
     if($Width -lt 50 -and $Height -ge ($items.Count+8)){
         foreach($item in $items){Add-Row $item $white}
@@ -511,7 +721,7 @@ function New-NovaFrame {
         $headings = switch($Page){
             '1' { 'Toolbox','Windows & apps' }
             '2' { 'Install apps','Diagnostics' }
-            'admin' { 'Diagnostics','Windows' }
+            'admin' { 'Owner tools','System tools' }
         }
         if($Width -ge 50 -and $Height -ge 16){Add-Row ($headings[0].PadRight($column)+$headings[1]) $secondary}
         for ($i=0;$i -lt $split;$i++) {
@@ -528,7 +738,11 @@ function New-NovaFrame {
     }
     Add-Row ('-' * $span) $dim
     if ($admin){Add-Row 'Esc  Back' $secondary}
-    else {Add-Row ("A / D  Page $Page of 2     0  Exit") $secondary}
+    else {
+        $sharingLabel=if($Sharing){'On'}else{'Off'}
+        Add-Row ("25  Run sharing  /  "+$sharingLabel) $white
+        Add-Row ("A / D  Page $Page of 2     0  Exit") $secondary
+    }
     $top = [Math]::Max(0,[int][Math]::Floor(($Height-$rows.Count-2)/2))
     $leftPad=' '*[Math]::Max(0,[int][Math]::Floor(($Width-$span)/2))
     $rightPad=' '*[Math]::Max(0,$Width-1-$leftPad.Length-$span)
@@ -613,6 +827,9 @@ function Show-NovaDiagnostic {
 }
 function Start-NovaMenu {
     $page=if($env:N0VA_PAGE -eq '2'){'2'}else{'1'}
+    $pendingKey=$null
+    $refreshOwner=$false
+    $drawn=''
     $previous=$page
     $cache=@{}
     $typed='';$sequence='';$lastSize=''
@@ -620,7 +837,12 @@ function Start-NovaMenu {
     try{$oldCursor=[Console]::CursorVisible}catch{}
     try{
         [Console]::CursorVisible=$false
-        if($env:N0VA_INTRO -eq '1'){[NovaDisplay]::Fullscreen();[NovaDisplay]::Intro($false,$color)}
+        if($env:N0VA_INTRO -eq '1'){
+            try{Send-NovaLaunch}catch{$script:HistoryStatus='Launch could not be shared'}
+            [NovaDisplay]::Fullscreen()
+            $skipped=[NovaDisplay]::Intro($false,$color)
+            if($null -ne $skipped -and $skipped.Key -in @('N','S')){$pendingKey=$skipped}
+        }
         while($true){
             $w=[Console]::WindowWidth;$h=[Console]::WindowHeight
             if($w -lt 5 -or $h -lt 2){throw 'Terminal window is too small.'}
@@ -631,23 +853,38 @@ function Start-NovaMenu {
                 $lastSize=$size
             }
             $frame=$cache[$page]
-            [Console]::SetCursorPosition(0,[Console]::WindowTop)
-            [Console]::Write($frame.Text)
-            [Console]::SetCursorPosition($frame.X,[Console]::WindowTop+$frame.Y)
-            [Console]::Write($typed)
-            while(![Console]::KeyAvailable){
+            $stamp="$size/$page/$typed"
+            if($drawn -ne $stamp){
+                [Console]::SetCursorPosition(0,[Console]::WindowTop)
+                [Console]::Write($frame.Text)
+                [Console]::SetCursorPosition($frame.X,[Console]::WindowTop+$frame.Y)
+                [Console]::Write($typed)
+                $drawn=$stamp
+            }
+            if($refreshOwner){
+                $refreshOwner=$false
+                try{[void](Get-NovaOwnerData 'recent' 1)}
+                catch{$script:OwnerSummary=$null;$script:HistoryStatus='History unavailable   /   07  Retry'}
+                $lastSize='';$drawn='';continue
+            }
+            while($null -eq $pendingKey -and ![Console]::KeyAvailable){
                 if([Console]::WindowWidth -ne $w -or [Console]::WindowHeight -ne $h){break}
                 Start-Sleep -Milliseconds 16
             }
-            if(![Console]::KeyAvailable){continue}
-            $key=[Console]::ReadKey($true)
+            if($null -ne $pendingKey){$key=$pendingKey;$pendingKey=$null}
+            elseif([Console]::KeyAvailable){$key=[Console]::ReadKey($true)}
+            else{continue}
             $ch=[char]::ToLowerInvariant($key.KeyChar)
             if($page -ne 'admin'){
                 $sequence=($sequence+$ch)
                 if($sequence.Length -gt 8){$sequence=$sequence.Substring($sequence.Length-8)}
                 if($sequence.EndsWith('nnnn')){
-                    $previous=$page;$page='admin';$sequence='';$typed=''
-                    [NovaDisplay]::Intro($true,$color);continue
+                    $pendingKey=$null
+    $refreshOwner=$false
+    $drawn=''
+    $previous=$page;$page='admin';$sequence='';$typed=''
+                    $refreshOwner=[IO.File]::Exists($OwnerFile)
+                    [void][NovaDisplay]::Intro($true,$color);continue
                 }
                 if($sequence.EndsWith('seemless')){$number=21}
                 elseif($key.Key -in @('A','LeftArrow','D','RightArrow')){
@@ -662,11 +899,15 @@ function Start-NovaMenu {
             if($ch -ge '0' -and $ch -le '9' -and $typed.Length -lt 2){$typed+=$ch}
             if($key.Key -eq 'Enter' -and $typed.Length){
                 $candidate=[int]$typed
-                if($candidate -eq 0 -or $pages[$page] -match ('^'+$candidate.ToString('00')+' ')){$number=$candidate}
+                if($candidate -eq 0 -or ($candidate -eq 25 -and $page -ne 'admin') -or $pages[$page] -match ('^'+$candidate.ToString('00')+' ')){$number=$candidate}
                 $typed=''
             }
             if($number -lt 0){continue}
-            $typed='';$sequence=''
+            $drawn='';$typed='';$sequence=''
+            if($number -eq 25){
+                try{Show-NovaSharing}catch{Write-Host $_.Exception.Message;[void][Console]::ReadKey($true)}
+                $lastSize='';continue
+            }
             if($page -eq 'admin'){
                 if($number -eq 0){$page=$previous;continue}
                 if($number -le 3){$number+=21}
@@ -676,9 +917,13 @@ function Start-NovaMenu {
                             4 {Start-Process eventvwr.msc}
                             5 {Start-Process services.msc}
                             6 {Start-Process taskmgr.exe}
+                            7 {Show-NovaHistory 'recent'}
+                            8 {Show-NovaHistory 'profiles'}
+                            9 {[void](Connect-NovaOwner)}
+                            10 {Show-NovaHistory 'builds'}
                         }
                     }catch{Write-Host $_.Exception.Message;[void][Console]::ReadKey($true)}
-                    continue
+                    $lastSize='';continue
                 }
             }
             if($number -in @(22,23,24)){
@@ -690,7 +935,7 @@ function Start-NovaMenu {
                 $desktopFile=Join-Path $env:INSTALL_DIR 'SeemlessOS.ps1'
                 if(Test-Path -LiteralPath $desktopFile -PathType Leaf){
                     $source=[IO.File]::ReadAllText($desktopFile)
-                    if($source.StartsWith('# N0VA desktop build: 2.1')){
+                    if($source.StartsWith('# N0VA desktop build: 2.2')){
                         try{& ([scriptblock]::Create($source)) -InstallDir $env:INSTALL_DIR}
                         catch{Write-Host $_.Exception.Message;[void][Console]::ReadKey($true)}
                         continue
@@ -701,7 +946,15 @@ function Start-NovaMenu {
             }
             return $number
         }
-    }finally{[Console]::CursorVisible=$oldCursor}
+    }finally{Complete-NovaLaunch -Wait;[Console]::CursorVisible=$oldCursor}
 }
 if($env:N0VA_VIEW -eq 'menu'){exit (Start-NovaMenu)}
 if($env:N0VA_VIEW -eq 'diagnostic'){Show-NovaDiagnostic ([int]$env:choice)}
+if($env:N0VA_VIEW -eq 'sharing'){Show-NovaSharing}
+if($env:N0VA_VIEW -eq 'owner'){
+    Write-Host 'owner M3NU'
+    switch(Read-Host '7 Run history   8 User directory   9 Pair key   10 Builds'){
+        '7' {Show-NovaHistory 'recent'} '8' {Show-NovaHistory 'profiles'}
+        '9' {[void](Connect-NovaOwner)} '10' {Show-NovaHistory 'builds'}
+    }
+}

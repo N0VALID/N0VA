@@ -1,6 +1,6 @@
 # N0VA
 
-A Windows tool hub made by N0VALID. Version 2.1 opens with green Matrix rain and a centered logo reveal. Press any key to skip the intro. Use A/D or the left/right arrows to switch pages, type a number and press Enter to run a tool, or enter 0 to exit.
+A Windows tool hub made by N0VALID. Version 2.2 opens with green Matrix rain and a centered logo reveal. Press any key to skip the intro. Use A/D or the left/right arrows to switch pages, type a number and press Enter to run a tool, or enter 0 to exit.
 
 ## Page 1 - Tools and setup
 
@@ -45,7 +45,22 @@ WinUtil opens in a separate administrator PowerShell window and leaves errors vi
 
 ## owner M3NU
 
-Press **N four times in a row** on either hub page. An amber intro opens the panel. Enter 1, 2, or 3 for live performance, crash history, or a connection check. Enter 4, 5, or 6 for Event Viewer, Services, or Task Manager. Esc returns to the hub page you started on. The panel displays the Windows account's current elevation and uses that account's permissions.
+Press **N four times** on either hub page. You can start during the intro. Esc returns to the previous page.
+
+| Option | Owner tools |
+| --- | --- |
+| 7 | Run history, newest first |
+| 8 | Display names, run counts, first and last seen, and latest build per sharing profile |
+| 9 | Pair this Windows profile with your private N0VA owner key |
+| 10 | Launches, profiles and last use by build |
+
+After pairing, the panel shows total launches, distinct profiles and launches in the past 24 hours. Use A/D to page through records or R to refresh. The owner's key is supplied separately. The launcher checks it with the service and saves it with Windows current-user encryption. Keep the original private. Options 1 through 6 still open the local diagnostics and Windows tools.
+
+### Share a launch
+
+On either hub page, enter **25** and choose a display name to turn on sharing. Until then, the launcher sends no check-ins. Each check-in contains the chosen name, a random sharing profile, a launch ID and the N0VA build. The service timestamps accepted launches. Returning from a tool or retrying the same launch does not increase the count. Offline launches can be retried from option 25 during the same session. Names are self-reported, and one person can have multiple profiles.
+
+History views cover 90 days. Use option 25 to stop future submissions. To erase this profile's shared records, choose **D** before turning off sharing.
 
 ## Seemless 0S MODE
 
@@ -54,7 +69,9 @@ Choose **21** on page 1 or type **seemless** on either page. The shortcut works 
 The desktop keeps common tasks inside its own windows:
 
 - **Files:** browse folders, preview files, read and edit text, and create a text file or folder. Unsaved changes have Save, Discard, and Cancel choices.
-- **Browser:** F3 opens a separate WebView2 window with tabs, search, back, forward and reload. Close the window to return to the desktop. First use downloads the pinned Microsoft SDK components and requires the Microsoft Edge WebView2 Runtime. To use your own proxy, open Settings > Browser proxy. Clear the value to restore the system default.
+- **Browser:** F3 opens WebView2 with title, loading and audio indicators, full-URL tab tooltips, middle-click close and Ctrl+L/T/W. Settings saves connection, blocking and session preferences. The default uses the Windows connection. The Mullvad preset needs an active Mullvad VPN connection. Add your own HTTP, HTTPS or SOCKS5 endpoints for fixed or random-per-start routing. With multiple saved endpoints random mode picks a different one from the previous start. Provider routing determines the public IP.
+- **Privacy:** strict tracking prevention, password autosave and autofill disabled, and optional uBlock Origin Lite (on by default). The browser verifies the official SDK and blocker downloads. With blocking enabled, pages wait for extension initialization. New profiles default to temporary browsing data. Settings and downloaded files survive the session. If Windows still has a temporary profile open at exit, cleanup retries at the next launch.
+- **Standalone:** in Browser Settings, select **Install on this PC** for a Start-menu shortcut or **Save installer** to create a Windows installer. Browser-only starts do not run N0VA's launch sharing. The Edge WebView2 Runtime is required; the SDK and blocker components are fetched on first use over the system connection.
 - **Apps:** choose an app, confirm installation, and watch its progress inside the desktop. Windows may show its normal administrator prompt.
 - **Settings:** view PC, storage, network, and running-app information; choose a saved desktop theme.
 
@@ -67,7 +84,7 @@ The desktop is delivered as `SeemlessOS.ps1` in your Desktop N0VA folder and req
 Open Command Prompt and paste:
 
 ```bat
-curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=2.1" -o "%TEMP%\N0VA-v2.1.cmd" && "%TEMP%\N0VA-v2.1.cmd"
+curl.exe -fL "https://raw.githubusercontent.com/N0VALID/N0VA/main/N0VA.cmd?version=2.2" -o "%TEMP%\N0VA-v2.2.cmd" && "%TEMP%\N0VA-v2.2.cmd"
 ```
 
 ## Adding tools
