@@ -22,14 +22,19 @@ internal static class Smoke
                     using var client = await listener.AcceptTcpClientAsync(cancel.Token);
                     using var stream = client.GetStream();
                     using var reader = new StreamReader(stream, leaveOpen: true);
+                    var request = await reader.ReadLineAsync(cancel.Token);
                     while (await reader.ReadLineAsync(cancel.Token) is { Length: > 0 }) { }
                     var html = "<title>N0VA fixture</title><a href='/app.zip'>app</a><a href='/app.zip'>duplicate</a><a download='manual.pdf' href='/get?id=2'>manual</a><a download href='javascript:alert(1)'>bad</a>";
-                    var bytes = Encoding.UTF8.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: " + Encoding.UTF8.GetByteCount(html) + "\r\n\r\n" + html);
+                    var attachment = request?.StartsWith("GET /app.zip ") == true;
+                    if (attachment) html = "N0VA download fixture";
+                    var contentType = attachment ? "application/octet-stream\r\nContent-Disposition: attachment; filename=app.zip" : "text/html";
+                    var bytes = Encoding.UTF8.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nConnection: close\r\nContent-Length: " + Encoding.UTF8.GetByteCount(html) + "\r\n\r\n" + html);
                     await stream.WriteAsync(bytes, cancel.Token);
                 }
             } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
         });
         using var window = new BrowserWindow(root, new Preferences { AllowHttp = true });
+        window.IntegrationTest = true;
         window.Shown += async (_, _) => {
             try {
                 var t = window.Current!;
@@ -43,6 +48,22 @@ internal static class Smoke
                 if (c.Profile.PreferredTrackingPreventionLevel != CoreWebView2TrackingPreventionLevel.Strict || c.Settings.IsWebMessageEnabled || c.Settings.AreHostObjectsAllowed || !c.Settings.IsReputationCheckingRequired) throw new Exception("Privacy settings missing");
                 var links = await window.ScanFiles(t);
                 if (links.Count != 2 || !links.Any(x => x.Name == "manual.pdf")) throw new Exception("Download discovery failed: " + links.Count);
+                var savedFile = Path.Combine(root, "app.zip");
+                bool pickerCalled = false;
+                window.TestDownloadPicker = (name, source) => { pickerCalled = name == "app.zip" && source == "127.0.0.1"; return savedFile; };
+                c.Navigate(origin + "/app.zip");
+                deadline = DateTime.UtcNow.AddSeconds(20);
+                while ((!File.Exists(savedFile) || new FileInfo(savedFile).Length != 21) && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (!pickerCalled || !File.Exists(savedFile) || File.ReadAllText(savedFile) != "N0VA download fixture") throw new Exception("Confirmed download did not save correctly");
+                await Task.Delay(300);
+                if (!File.ReadAllText(savedFile + ":Zone.Identifier").Contains("ZoneId=3")) throw new Exception("Internet zone marker missing");
+                // A canceled save must not create the requested file.
+                pickerCalled = false;
+                window.TestDownloadPicker = (_, _) => { pickerCalled = true; return null; };
+                c.Navigate(origin + "/app.zip");
+                deadline = DateTime.UtcNow.AddSeconds(10);
+                while (!pickerCalled && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (!pickerCalled) throw new Exception("Download cancellation path not reached");
                 var before = c.Source;
                 await window.Navigate(t, "file:///C:/Windows/win.ini");
                 if (c.Source != before) throw new Exception("Privileged scheme accepted");
@@ -54,10 +75,11 @@ internal static class Smoke
                 if (c.Source != before) throw new Exception("Runtime HTTP navigation accepted");
                 window.Preferences.Theme = "Paper"; window.Preferences.Save(Path.Combine(root, "preferences.json"));
                 if (Preferences.Load(Path.Combine(root, "preferences.json")).Theme != "Paper") throw new Exception("Settings did not persist");
+                window.Preferences.Theme = "Graphite";
                 window.AddTab();
                 using var screenshot = new Bitmap(window.Width, window.Height); window.DrawToBitmap(screenshot, window.Bounds with { X = 0, Y = 0 });
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png"));
-                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, unsafe navigation rejection, saved settings.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, saved settings.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
                 result = 0;
             } catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); }
             finally { window.Close(); }

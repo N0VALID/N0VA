@@ -45,6 +45,7 @@ internal sealed partial class BrowserWindow : Form
     internal SiteTab? Current => tabs.SelectedTab as SiteTab;
     internal Preferences Preferences => prefs;
     internal bool BlockerReady => blockerReady;
+    internal bool IntegrationTest;
     internal string ProfileDirectory => profileDirectory;
 
     public BrowserWindow(string root, Preferences? initial = null)
@@ -144,6 +145,7 @@ internal sealed partial class BrowserWindow : Form
             t.Initialization = null; t.Ready = false; t.View?.Dispose(); t.View = null;
             if (environment?.IsFaulted == true) environment = null; if (blocker?.IsFaulted == true) blocker = null;
             Notice("Website not opened: " + e.GetBaseException().Message);
+            if (IntegrationTest) throw;
             MessageBox.Show(this, e.GetBaseException().Message + "\n\nNo website was loaded. Check that Microsoft Edge WebView2 Runtime is installed, then try again.", "Protection could not start");
         }
     }
@@ -192,6 +194,8 @@ internal sealed partial class BrowserWindow : Form
     }
     protected override bool ProcessCmdKey(ref Message msg, Keys key)
     {
+        if (key == (Keys.Alt | Keys.Left) && Current?.View?.CanGoBack == true) { Current.View.GoBack(); return true; }
+        if (key == (Keys.Alt | Keys.Right) && Current?.View?.CanGoForward == true) { Current.View.GoForward(); return true; }
         if (key == (Keys.Control | Keys.L)) { address.Focus(); address.SelectAll(); return true; }
         if (key == (Keys.Control | Keys.T)) { AddTab(); return true; }
         if (key == (Keys.Control | Keys.W) && Current is { } t) { CloseTab(t); return true; }

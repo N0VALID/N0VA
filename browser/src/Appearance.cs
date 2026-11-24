@@ -38,7 +38,7 @@ internal sealed partial class BrowserWindow
         box.Controls.Add(Caption("HTTPS by default   /   No N0VA telemetry   /   Local preferences", 9));
         box.Controls.Add(ActionButton("Personalize", OpenSettings));
         home.Controls.Add(box);
-        void Place() { box.Left = Math.Max(12, (home.ClientSize.Width - box.Width) / 2); box.Top = Math.Max(24, (home.ClientSize.Height - box.Height) / 2 - 35); }
+        void Place() { box.Width = Math.Min(620, Math.Max(280, home.ClientSize.Width - 24)); search.Width = box.Width - 56; foreach (var caption in box.Controls.OfType<Label>()) caption.MaximumSize = new Size(box.Width - 56, 0); box.Left = Math.Max(12, (home.ClientSize.Width - box.Width) / 2); box.Top = Math.Max(24, (home.ClientSize.Height - box.Height) / 2 - 35); }
         home.Resize += (_, _) => Place(); tab.Controls.Add(home); tab.Home = home; Place(); home.BringToFront();
     }
     void OpenSettings()

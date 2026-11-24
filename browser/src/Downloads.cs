@@ -63,6 +63,29 @@ internal sealed partial class BrowserWindow
     }
     void DownloadStarting(CoreWebView2DownloadStartingEventArgs e)
     {
+        // WebView2 callbacks cannot host a nested modal message loop. Defer first,
+        // then show native prompts on a fresh UI dispatch outside the callback.
+        e.Handled = true;
+        var deferral = e.GetDeferral();
+        try {
+            BeginInvoke((Action)(() => {
+                try { if (closing) e.Cancel = true; else ConfirmDownload(e); }
+                catch (Exception ex) { e.Cancel = true; Notice("Download canceled: " + ex.Message); }
+                finally { deferral.Complete(); }
+            }));
+        } catch { e.Cancel = true; deferral.Complete(); }
+    }
+    // Native integration tests supply a path in their isolated temporary folder.
+    // Production always uses the native Save dialog below.
+    internal Func<string, string, string?>? TestDownloadPicker;
+    string? ChooseDownloadPath(string name, string source)
+    {
+        if (TestDownloadPicker != null) return TestDownloadPicker(name, source);
+        using var dialog = new SaveFileDialog { FileName = name, Title = "Save from " + source, OverwritePrompt = true, Filter = "All files|*.*" };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+    void ConfirmDownload(CoreWebView2DownloadStartingEventArgs e)
+    {
         // A native confirmation is required for every download, including automatic website requests.
         e.Handled = true;
         var operation = e.DownloadOperation;
@@ -70,9 +93,8 @@ internal sealed partial class BrowserWindow
         if (!Policy.WebUrl(operation.Uri, prefs.AllowHttp)) { e.Cancel = true; Notice("Download blocked: unsupported or unencrypted source."); return; }
         if (activeDownloads.Count >= 4) { e.Cancel = true; Notice("Four downloads are active. Wait for one to finish."); return; }
         if (Policy.RiskyFile(name) && MessageBox.Show(this, name + " can run code or change your computer.\n\nSource: " + new Uri(operation.Uri).IdnHost + "\nOnly save it if you trust the publisher. N0VA never runs downloads automatically.", "Save an executable file?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { e.Cancel = true; return; }
-        using var dialog = new SaveFileDialog { FileName = name, Title = "Save from " + new Uri(operation.Uri).IdnHost, OverwritePrompt = true, Filter = "All files|*.*" };
-        if (dialog.ShowDialog(this) != DialogResult.OK) { e.Cancel = true; return; }
-        var savedPath = dialog.FileName;
+        var savedPath = ChooseDownloadPath(name, new Uri(operation.Uri).IdnHost);
+        if (savedPath == null) { e.Cancel = true; return; }
         e.ResultFilePath = savedPath;
         activeDownloads.Add(operation); downloads.Visible = true;
         var row = new FlowLayoutPanel { Width = 340, Height = 100, FlowDirection = FlowDirection.TopDown, WrapContents = false };
