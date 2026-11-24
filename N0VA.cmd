@@ -10,17 +10,10 @@ if not errorlevel 1 exit 0
 :nova_started
 color 0B
 
-rem Run the embedded startup once, before entering the tool menu.
 set "N0VA_LAUNCHER=%~f0"
-powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 1 }"
-if errorlevel 1 (
-    echo Startup could not finish. Please copy the error above.
-    pause
-)
-color 0B
-
+set "N0VA_INTRO=1"
 set "BASE_URL=https://raw.githubusercontent.com/N0VALID/N0VA/main"
-set "N0VA_BUILD=2.0"
+set "N0VA_BUILD=2.1"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
 for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul`) do if not "%%D"=="" set "DESKTOP_DIR=%%D"
 set "INSTALL_DIR=%DESKTOP_DIR%\N0VA"
@@ -30,14 +23,16 @@ set "N0VA_PAGE=1"
 set "N0VA_VIEW=menu"
 powershell.exe -NoProfile -Command "$text = [IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker = '# N0VA_STARTUP_PS'; try { & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker) + $marker.Length))) } catch { Write-Host ('N0VA error: ' + $_.Exception.Message) -ForegroundColor Red; exit 250 }"
 set "choice=%errorlevel%"
+set "N0VA_INTRO="
 set "N0VA_VIEW="
+if "%choice%"=="122" goto desktop_page_two
 if "%choice%"=="250" goto menu_fallback
 if "%choice%"=="101" goto next_page
 if "%choice%"=="100" goto previous_page
 goto dispatch
 
 :menu_fallback
-echo N0VA - Made by N0VALID - v2.0 - Page %N0VA_PAGE% of 2
+echo N0VA - Made by N0VALID - v2.1 - Page %N0VA_PAGE% of 2
 if "%N0VA_PAGE%"=="1" (
     echo [1] Python [2] EXE Compiler [3] Computer Info [4] N0VA Folder
     echo [5] WinUtil [6] Update Apps [7] Disk Cleanup [8] Startup Apps
@@ -46,12 +41,14 @@ if "%N0VA_PAGE%"=="1" (
 ) else (
     echo [14] 7-Zip [15] Notepad++ [16] VS Code [17] Git
     echo [18] VLC [19] Everything Search [20] PowerToys
+    echo [22] Live performance [23] Recent app crashes [24] Connection check
 )
 echo [A] Previous page  [D] Next page  [0] Exit
-set "choice="
-set /p "choice=N0VA > "
-if /i "%choice%"=="d" goto next_page
-if /i "%choice%"=="a" goto previous_page
+powershell.exe -NoProfile -Command "$v=Read-Host 'N0VA'; if($v -eq 'd'){exit 101}; if($v -eq 'a'){exit 100}; if($v -match '^[0-9]{1,2}$'){exit ([int]$v)}; exit 250"
+set "choice=%errorlevel%"
+if "%choice%"=="250" goto menu_fallback
+if "%choice%"=="101" goto next_page
+if "%choice%"=="100" goto previous_page
 
 :dispatch
 rem Remember the page selected inside the persistent PowerShell menu.
@@ -78,6 +75,7 @@ if "%choice%"=="18" goto vlc
 if "%choice%"=="19" goto everything
 if "%choice%"=="20" goto powertoys
 if "%choice%"=="21" goto seamless_os
+if %choice% GEQ 22 if %choice% LEQ 24 goto diagnostic
 if "%choice%"=="0" goto done
 echo.
 echo Invalid selection.
@@ -92,8 +90,20 @@ goto menu
 set "N0VA_PAGE=1"
 goto menu
 
+:diagnostic
+set "N0VA_PAGE=2"
+set "N0VA_VIEW=diagnostic"
+powershell.exe -NoProfile -Command "$text=[IO.File]::ReadAllText($env:N0VA_LAUNCHER); $marker='# N0VA_STARTUP_PS'; & ([scriptblock]::Create($text.Substring($text.LastIndexOf($marker)+$marker.Length)))"
+pause
+goto menu
+
+:desktop_page_two
+set "N0VA_PAGE=2"
+goto open_desktop
+
 :seamless_os
 set "N0VA_PAGE=1"
+:open_desktop
 echo Starting Seemless 0S MODE...
 call :download "SeemlessOS.ps1"
 if errorlevel 1 (
@@ -367,318 +377,331 @@ if ($env:N0VA_VIEW -eq 'dependencies') {
     Write-Host 'All N0VA Python dependencies installed successfully.' -ForegroundColor Green
     return
 }
-# Enable ANSI true color in Windows console hosts as well as Windows Terminal.
-$script:NovaTrueColor = ($env:TERM -match 'xterm|screen|vt100')
-try {
+if (-not ('NovaDisplay' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
+using System.Text;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
-public static class NovaVT {
-    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int kind);
-    [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
-    [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
-}
-'@
-    $mode = [uint32]0
-    $handle = [NovaVT]::GetStdHandle(-11)
-    if ([NovaVT]::GetConsoleMode($handle, [ref]$mode)) {
-        $script:NovaTrueColor = [NovaVT]::SetConsoleMode($handle, ($mode -bor 4))
+using System.Threading;
+public static class NovaDisplay {
+    [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr h, out uint mode);
+    [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr h, uint mode);
+    [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int command);
+    [DllImport("kernel32.dll")] static extern bool SetConsoleDisplayMode(IntPtr h, uint flags, out int size);
+    public static bool UseColor() {
+        try { uint mode; var h=GetStdHandle(-11); return GetConsoleMode(h,out mode) && SetConsoleMode(h,mode|4); }
+        catch { return !String.IsNullOrEmpty(Environment.GetEnvironmentVariable("TERM")); }
     }
-} catch { }
-$script:NovaEscape = [string][char]27
-function Get-NovaInk {
-    param([double]$Phase, [double]$Brightness = 1)
-    $r = [int]((140 + 115 * [Math]::Sin($Phase)) * $Brightness)
-    $g = [int]((140 + 115 * [Math]::Sin($Phase + 2.0944)) * $Brightness)
-    $b = [int]((140 + 115 * [Math]::Sin($Phase + 4.1888)) * $Brightness)
-    return "$($script:NovaEscape)[38;2;$r;$g;${b}m"
-}
-function Get-NovaRainbow {
-    param([string]$Text, [double]$Phase = 0)
-    if (-not $script:NovaTrueColor) { return $Text }
-    $builder = New-Object Text.StringBuilder
-    for ($i = 0; $i -lt $Text.Length; $i++) {
-        [void]$builder.Append((Get-NovaInk -Phase ($Phase + $i * 0.18)))
-        [void]$builder.Append($Text[$i])
+    public static void Fullscreen() {
+        try { int size; if (!SetConsoleDisplayMode(GetStdHandle(-11),1,out size)) ShowWindow(GetConsoleWindow(),3); } catch {}
     }
-    [void]$builder.Append("$($script:NovaEscape)[0m")
-    return $builder.ToString()
-}
-function Write-NovaCentered {
-    param([string]$Text, [ConsoleColor]$Color = 'Cyan', [switch]$NoNewline, [switch]$Rainbow, [double]$Phase = 0)
-    [Console]::ForegroundColor = $Color
-    $padding = [Math]::Max(0, [int][Math]::Floor(([Console]::WindowWidth - $Text.Length) / 2))
-    $painted = $Text
-    if ($Rainbow) { $painted = Get-NovaRainbow -Text $Text -Phase $Phase }
-    $output = (' ' * $padding) + $painted
-    if ($NoNewline) { [Console]::Write($output) }
-    else { [Console]::WriteLine($output) }
-}
-function Read-NovaMenuChoice {
-    param([int]$Page)
-    $typed = ''
-    $f4Count = 0
-    $lastF4 = [DateTime]::MinValue
-    while ($true) {
-        $key = [Console]::ReadKey($true)
-        if ($key.Key -eq 'F4') {
-            $now = [DateTime]::UtcNow
-            if (($now - $lastF4).TotalSeconds -gt 2) { $f4Count = 0 }
-            $lastF4 = $now
-            $f4Count++
-            if ($f4Count -eq 5) { return 121 }
-            continue
-        }
-        $f4Count = 0
-        switch ($key.Key) {
-            'A' { return 100 }
-            'D' { return 101 }
-            'Backspace' {
-                if ($typed.Length -gt 0) {
-                    $typed = $typed.Substring(0, $typed.Length - 1)
-                    [Console]::Write("`b `b")
-                }
-                continue
-            }
-            'Enter' {
-                if ($typed.Length -gt 0) {
-                    $number = [int]$typed
-                    if ($number -eq 0 -or ($Page -eq 1 -and (($number -ge 1 -and $number -le 13) -or $number -eq 21)) -or
-                        ($Page -eq 2 -and $number -ge 14 -and $number -le 20)) {
-                        [Console]::WriteLine()
-                        return $number
+    static readonly string[] logo = {
+        "NN   NN   0000   VV     VV    AAA   ",
+        "NNN  NN  00  00   VV   VV    AA AA  ",
+        "NN N NN  00  00    VV VV    AA   AA ",
+        "NN  NNN  00  00     VVV     AAAAAAA ",
+        "NN   NN   0000       V      AA   AA " };
+    public static string[] Logo { get { return logo; } }
+    public static void Intro(bool admin, bool color) {
+        int w=Console.WindowWidth-1, h=Console.WindowHeight;
+        if(w<15 || h<8)return;
+        var rng=new Random();
+        var start=new int[w]; var speed=new int[w]; var length=new int[w];
+        for(int x=0;x<w;x++) { start[x]=rng.Next(h+22); speed[x]=rng.Next(12,34); length[x]=rng.Next(5,17); }
+        string[] mark=admin ? new[]{"[  owner M3NU  ]"} : (w<40 ? new[]{"N0VA","","Made by N0VALID"} :
+            new[]{logo[0],logo[1],logo[2],logo[3],logo[4],"","Made by N0VALID"});
+        var palette=admin ? new[]{"0","38;2;64;42;26","38;2;166;95;44","38;2;255;191;99","38;2;255;234;196"} :
+            new[]{"0","38;2;16;67;53","38;2;27;132;89","38;2;81;223;155","38;2;187;255;223"};
+        string chars="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<>{}";
+        var timer=Stopwatch.StartNew(); var frame=new StringBuilder();
+        int duration=admin?690:3050;
+        while(timer.ElapsedMilliseconds<duration && Console.WindowWidth-1==w && Console.WindowHeight==h) {
+            if(!admin && Console.KeyAvailable) { Console.ReadKey(true); break; }
+            int ms=(int)timer.ElapsedMilliseconds, tick=ms/65;
+            double progress=Math.Max(0,Math.Min(1,(ms-(admin?60:1740))/(admin?320.0:610.0)));
+            frame.Clear(); int last=-1;
+            for(int y=0;y<h;y++) {
+                int row=y-(h-mark.Length)/2;
+                for(int x=0;x<w;x++) {
+                    char ch=' '; int ink=0;
+                    if(admin) {
+                        int radius=ms*w/780;
+                        int dx=Math.Abs(x-w/2), dy=Math.Abs(y-h/2);
+                        if(dy==2 && dx<=radius) {ch='-';ink=dx>radius-3?4:2;}
+                        else if(dx==radius && dy<2){ch='|';ink=3;}
+                    } else if((x&1)==0) {
+                        int distance=(start[x]+ms*speed[x]/1000)%(h+22)-y;
+                        if(distance>=0 && distance<length[x] && (progress<1 || distance<4)) {
+                            ch=chars[(start[x]+x*3+y*7+tick/2)%chars.Length];
+                            ink=distance==0?4:(distance<3?3:(distance<7?2:1));
+                        }
                     }
-                    for ($i = 0; $i -lt $typed.Length; $i++) { [Console]::Write("`b `b") }
-                    $typed = ''
+                    if(row>=0 && row<mark.Length && progress>0) {
+                        int col=x-(w-mark[row].Length)/2;
+                        if(col>=-2 && col<mark[row].Length+2 && col<progress*(mark[row].Length+3)) {
+                            ch=col>=0 && col<mark[row].Length?mark[row][col]:' ';
+                            ink=col>progress*(mark[row].Length+3)-3?4:(row==mark.Length-1?4:3);
+                        }
+                    }
+                    if(color && ch!=' ' && ink!=last) {frame.Append("\x1b[").Append(palette[ink]).Append('m');last=ink;}
+                    frame.Append(ch);
                 }
-                continue
+                if(y<h-1)frame.Append("\r\n");
             }
-        }
-        if ($key.KeyChar -ge '0' -and $key.KeyChar -le '9' -and $typed.Length -lt 2) {
-            $typed += [string]$key.KeyChar
-            [Console]::Write($key.KeyChar)
+            if(color)frame.Append("\x1b[0m");
+            Console.SetCursorPosition(0,Console.WindowTop);Console.Write(frame.ToString());Thread.Sleep(32);
         }
     }
-}
-function New-NovaMenuFrame {
-    param($Rows, [int]$Width, [int]$Height)
-    $top = [Math]::Max(0, [int][Math]::Floor(($Height - $Rows.Count - 1) / 2))
-    $frame = New-Object Text.StringBuilder
-    $prompt = 'N0VA > '
-    $promptY = [Math]::Min($Height - 1, $top + $Rows.Count)
-    $promptX = [Math]::Max(0, [int][Math]::Floor(($Width - $prompt.Length) / 2))
-    for ($y = 0; $y -lt $Height; $y++) {
-        $text = ''
-        $index = $y - $top
-        if ($index -ge 0 -and $index -lt $Rows.Count) { $text = [string]$Rows[$index][0] }
-        if ($y -eq $promptY) { $text = $prompt }
-        if ($text.Length -gt $Width - 1) { $text = $text.Substring(0, [Math]::Max(0, $Width - 1)) }
-        $left = [Math]::Max(0, [int][Math]::Floor(($Width - $text.Length) / 2))
-        $right = [Math]::Max(0, $Width - 1 - $left - $text.Length)
-        $painted = Get-NovaRainbow -Text $text -Phase ($index * 0.28)
-        [void]$frame.Append((' ' * $left) + $painted + (' ' * $right))
-        if ($y -lt $Height - 1) { [void]$frame.Append("`r`n") }
-    }
-    return [pscustomobject]@{ Text = $frame.ToString(); PromptX = $promptX + $prompt.Length; PromptY = $promptY }
-}
-function Get-NovaMenuRows {
-    param([int]$Page)
-    $rows = @(
-        @('NN   NN    000    VV      VV     AAA', 'Green'),
-        @('NNN  NN   00 00    VV    VV     AA AA', 'Green'),
-        @('NN N NN   00 00     VV  VV     AA   AA', 'Cyan'),
-        @('NN  NNN   00 00      VVVV      AAAAAAA', 'Cyan'),
-        @('NN   NN    000        VV       AA   AA', 'DarkCyan'),
-        @('', 'Black'),
-        @('T O O L   H U B', 'Green'),
-        @('Made by N0VALID', 'Magenta'),
-        @('PAGE 1 / 2 - TOOLS AND SETUP', 'Cyan'),
-        @('==================================================================', 'DarkCyan'),
-        @('SETUP AND TOOLS                   WINDOWS                 ', 'Cyan'),
-        @('', 'Black'),
-        @('[1] Install Python                [5] Chris Titus WinUtil  ', 'Green'),
-        @('[2] EXE Compiler                  [6] Update Installed Apps', 'Cyan'),
-        @('[3] Computer Info                 [7] Disk Cleanup         ', 'Green'),
-        @('[4] Open N0VA Folder              [8] Startup Apps         ', 'Cyan'),
-        @('[9] Command Explorer             [10] Install Brave       ', 'Green'),
-        @('[11] Install Steam               [12] All Python packages ', 'Cyan'),
-        @('[13] Install RustDesk                                     ', 'Green'),
-        @('[21] Seemless 0S MODE - terminal desktop', 'Cyan'),
-        @('==================================================================', 'DarkCyan'),
-        @('[0] Exit                                             v2.0', 'Magenta'),
-        @('[A] Previous page                       [D] Next page', 'Cyan')
-    )
-    if ($page -eq 2) {
-        # Keep the title, frame and footer in the same place on both pages.
-        $rows[8] = @('PAGE 2 / 2 - USEFUL DOWNLOADS', 'Cyan')
-        $rows[10] = @('FILES AND EDITORS                 DEVELOPMENT AND UTILITIES', 'Cyan')
-        $rows[12] = @('[14] Install 7-Zip                [16] Install VS Code     ', 'Green')
-        $rows[13] = @('[15] Install Notepad++            [17] Install Git         ', 'Cyan')
-        $rows[14] = @('[18] Install VLC                  [19] Everything Search   ', 'Green')
-        $rows[15] = @('[20] Install PowerToys                                    ', 'Cyan')
-        $rows[16] = @('', 'Black')
-        $rows[17] = @('', 'Black')
-        $rows[18] = @('', 'Black')
-        $rows[19] = @('', 'Black')
-    }
-    return ,$rows
-}
-if ($env:N0VA_VIEW -eq 'menu') {
-    $page = 1
-    if ($env:N0VA_PAGE -eq '2') { $page = 2 }
-    [Console]::BackgroundColor = 'Black'
-    $frames = @{}
-    while ($true) {
-    $rows = Get-NovaMenuRows -Page $page
-    $width = [Console]::WindowWidth
-    $height = [Console]::WindowHeight
-    $cacheKey = '{0}:{1}:{2}' -f $page, $width, $height
-    if (-not $frames.ContainsKey($cacheKey)) {
-        # Prepare both pages before waiting for input, so every switch is cached.
-        foreach ($framePage in 1, 2) {
-            $key = '{0}:{1}:{2}' -f $framePage, $width, $height
-            $frames[$key] = New-NovaMenuFrame -Rows (Get-NovaMenuRows -Page $framePage) -Width $width -Height $height
-        }
-    }
-    $frame = $frames[$cacheKey]
-    # Paint a completed frame over the old one; never clear between pages.
-    try {
-        [Console]::CursorVisible = $false
-        [Console]::SetCursorPosition(0, [Console]::WindowTop)
-        [Console]::Write($frame.Text)
-        [Console]::SetCursorPosition($frame.PromptX, [Console]::WindowTop + $frame.PromptY)
-    } finally { [Console]::CursorVisible = $true }
-    $selection = Read-NovaMenuChoice -Page $page
-    if ($selection -eq 101) { $page = 2; continue }
-    if ($selection -eq 100) { $page = 1; continue }
-    if ($selection -eq 121) {
-        $desktopFile = Join-Path $env:INSTALL_DIR 'SeemlessOS.ps1'
-        if (-not (Test-Path -LiteralPath $desktopFile -PathType Leaf)) { exit 21 }
-        $desktopSource = [IO.File]::ReadAllText($desktopFile)
-        # Refresh a saved desktop from an older build once, then launch locally.
-        if (-not $desktopSource.Contains('# N0VA desktop build: 2.0')) { exit 21 }
-        try {
-            & ([scriptblock]::Create($desktopSource)) -InstallDir $env:INSTALL_DIR
-        } catch {
-            Write-Host ('Desktop error: ' + $_.Exception.Message) -ForegroundColor Red
-            Write-Host 'Press a key to return to N0VA.'
-            [void][Console]::ReadKey($true)
-        }
-        continue
-    }
-    exit $selection
-    }
-}
-
-try {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class N0VAWindow {
-    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int kind);
-    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool SetConsoleDisplayMode(IntPtr output, uint flags, out COORD size);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
-    [StructLayout(LayoutKind.Sequential)] public struct COORD { public short X; public short Y; }
 }
 '@
-    $size = New-Object N0VAWindow+COORD
-    $fullscreen = [N0VAWindow]::SetConsoleDisplayMode([N0VAWindow]::GetStdHandle(-11), 1, [ref]$size)
-    if (-not $fullscreen) {
-        # Hosts that cannot enter console fullscreen get a maximized window.
-        [void][N0VAWindow]::ShowWindow([N0VAWindow]::GetConsoleWindow(), 3)
-    }
-} catch { }
-$previousColor = [Console]::ForegroundColor
-$previousBackground = [Console]::BackgroundColor
-$previousCursor = $true
-try { $previousCursor = [Console]::CursorVisible } catch { }
-try {
-    [Console]::BackgroundColor = 'Black'
-    [Console]::ForegroundColor = 'Cyan'
-    [Console]::CursorVisible = $false
-    [Console]::Clear()
-    # Independent falling streams, with bright heads and dark green tails.
-    $random = New-Object System.Random
-    $glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:<>/{}[]'
-    $width = [Math]::Max(1, [Console]::WindowWidth - 1)
-    $height = [Math]::Max(1, [Console]::WindowHeight - 1)
-    $columns = @()
-    for ($x = 0; $x -lt $width; $x += 2) {
-        $columns += [pscustomobject]@{
-            X = $x
-            Head = $random.Next(-$height, $height)
-            Length = $random.Next(5, 16)
-            Speed = $random.Next(1, 3)
-            Palette = $random.Next(0, 6)
-        }
-    }
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    while ($clock.ElapsedMilliseconds -lt 3000) {
-        # Leave the animation cleanly if the user resizes the terminal.
-        if ([Console]::WindowWidth -le $width -or [Console]::WindowHeight -le $height) { break }
-        foreach ($column in $columns) {
-            # Erase the previous stream before advancing it.
-            for ($offset = 0; $offset -le $column.Length; $offset++) {
-                $y = $column.Head - $offset
-                if ($y -ge 0 -and $y -lt $height) {
-                    [Console]::SetCursorPosition($column.X, $y)
-                    [Console]::Write(' ')
-                }
-            }
-            $column.Head += $column.Speed
-            if ($column.Head - $column.Length -ge $height) {
-                $column.Head = $random.Next(-12, 0)
-            }
-            for ($offset = $column.Length; $offset -ge 0; $offset--) {
-                $y = $column.Head - $offset
-                if ($y -ge 0 -and $y -lt $height) {
-                    if ($offset -eq 0) { [Console]::ForegroundColor = 'White' }
-                    elseif ($column.Palette -eq 4) {
-                        if ($offset -lt 4) { [Console]::ForegroundColor = 'Cyan' }
-                        else { [Console]::ForegroundColor = 'DarkCyan' }
-                    } elseif ($column.Palette -eq 5) {
-                        if ($offset -lt 4) { [Console]::ForegroundColor = 'Magenta' }
-                        else { [Console]::ForegroundColor = 'DarkMagenta' }
-                    } elseif ($offset -lt 4) { [Console]::ForegroundColor = 'Green' }
-                    else { [Console]::ForegroundColor = 'DarkGreen' }
-                    [Console]::SetCursorPosition($column.X, $y)
-                    $glyph = [string]$glyphs[$random.Next($glyphs.Length)]
-                    if ($script:NovaTrueColor -and $offset -gt 0) {
-                        $phase = $column.X * 0.07 + $clock.ElapsedMilliseconds / 700.0 + $offset * 0.09
-                        $brightness = [Math]::Max(0.12, 1.0 - $offset / [double]($column.Length + 1))
-                        [Console]::Write((Get-NovaInk -Phase $phase -Brightness $brightness) + $glyph + "$($script:NovaEscape)[0m")
-                    } else { [Console]::Write($glyph) }
-                }
-            }
-        }
-        Start-Sleep -Milliseconds 55
-    }
-    $clock.Stop()
-    [Console]::Clear()
-    [Console]::ForegroundColor = 'Cyan'
-    $logo = @(
-        'NN   NN   000   VV     VV    AAA',
-        'NNN  NN  00 00   VV   VV    AA AA',
-        'NN N NN  00 00   VV   VV   AA   AA',
-        'NN  NNN  00 00    VV VV    AAAAAAA',
-        'NN   NN   000      VVV     AA   AA',
-        '',
-        'T O O L   H U B',
-        '',
-        'Made by N0VALID'
-    )
-    $top = [Math]::Max(0, [int](([Console]::WindowHeight - $logo.Count) / 2))
-    foreach ($line in $logo) {
-        [Console]::SetCursorPosition(0, $top)
-        Write-NovaCentered -Text $line -Rainbow -Phase ($top * 0.28)
-        $top++
-    }
-    Start-Sleep -Milliseconds 2200
-} finally {
-    [Console]::CursorVisible = $previousCursor
-    [Console]::ForegroundColor = $previousColor
-    [Console]::BackgroundColor = $previousBackground
-    [Console]::Clear()
 }
+$color = [NovaDisplay]::UseColor()
+$access='Standard user'
+try {
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal=New-Object Security.Principal.WindowsPrincipal($identity)
+    if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){ $access='Elevated' }
+} catch {}
+$esc = [string][char]27
+$reset = "$esc[0m"
+# Numbered entries keep their original IDs on both the wide and compact menus.
+$pages = @{
+    '1' = @('01  Install Python','02  EXE Compiler','03  Computer info','04  N0VA folder',
+        '09  Command Explorer','12  Python packages','21  Seemless 0S MODE',
+        '05  WinUtil','06  Update apps','07  Disk cleanup','08  Startup apps',
+        '10  Install Brave','11  Install Steam','13  Install RustDesk')
+    '2' = @('14  7-Zip','15  Notepad++','16  VS Code','17  Git','18  VLC',
+        '19  Everything Search','20  PowerToys','22  Live performance','23  Recent app crashes','24  Connection check')
+    'admin' = @('01  Live performance','02  Recent app crashes','03  Connection check',
+        '04  Event Viewer','05  Services','06  Task Manager')
+}
+function New-NovaFrame {
+    param([string]$Page,[int]$Width,[int]$Height)
+    $admin = $Page -eq 'admin'
+    $accent = "$esc[38;2;111;237;193m"
+    $secondary = "$esc[38;2;120;178;250m"
+    $dim = "$esc[38;2;119;141;158m"
+    $white = "$esc[38;2;227;237;242m"
+    if ($admin) { $accent="$esc[38;2;255;191;102m"; $secondary="$esc[38;2;234;152;97m" }
+    $span = [Math]::Max(1,[Math]::Min(61,$Width-2))
+    $column = [int][Math]::Floor($span/2)
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    function Add-Row([string]$value,[string]$ink) {
+        $value=$value.Substring(0,[Math]::Min($value.Length,$span)).PadRight($span)
+        if ($color) { $value=$ink+$value+$reset }
+        $rows.Add($value)
+    }
+    if (!$admin -and $Height -ge 23) {
+        foreach($line in [NovaDisplay]::Logo){ Add-Row $line $accent }
+        Add-Row '' ''
+    }
+    $title = switch($Page){'1'{'N0VA  /  Tools'} '2'{'N0VA  /  Downloads & diagnostics'} 'admin'{'owner M3NU'}}
+    Add-Row $title $accent
+    Add-Row ('-' * $span) $dim
+    if($admin){Add-Row ([Environment]::MachineName+'  /  '+$access) $secondary}
+    $items = $pages[$Page]
+    $split = switch($Page){'1'{7} '2'{7} 'admin'{3}}
+    # Shorten only the narrow layout, keeping both the numbers and labels visible.
+    if($Width -lt 50 -and $Height -ge ($items.Count+8)){
+        foreach($item in $items){Add-Row $item $white}
+    }else{
+        $headings = switch($Page){
+            '1' { 'Toolbox','Windows & apps' }
+            '2' { 'Install apps','Diagnostics' }
+            'admin' { 'Diagnostics','Windows' }
+        }
+        if($Width -ge 50 -and $Height -ge 16){Add-Row ($headings[0].PadRight($column)+$headings[1]) $secondary}
+        for ($i=0;$i -lt $split;$i++) {
+            $first=$items[$i]
+            $left=$first.Substring(0,[Math]::Min($first.Length,[Math]::Max(1,$column-1))).PadRight($column)
+            $right=if($i+$split -lt $items.Count){$items[$i+$split]}else{''}
+            $line=($left+$right).PadRight($span).Substring(0,$span)
+            if($color){
+                $line=[regex]::Replace($line,'(?<!\S)[0-9]{2}(?=  )',($accent+'$0'+$white))
+                $line=$white+$line+$reset
+            }
+            $rows.Add($line)
+        }
+    }
+    Add-Row ('-' * $span) $dim
+    if ($admin){Add-Row 'Esc  Back' $secondary}
+    else {Add-Row ("A / D  Page $Page of 2     0  Exit") $secondary}
+    $top = [Math]::Max(0,[int][Math]::Floor(($Height-$rows.Count-2)/2))
+    $leftPad=' '*[Math]::Max(0,[int][Math]::Floor(($Width-$span)/2))
+    $rightPad=' '*[Math]::Max(0,$Width-1-$leftPad.Length-$span)
+    $blank=' '*[Math]::Max(0,$Width-1)
+    $frame=New-Object Text.StringBuilder
+    $promptY=[Math]::Min($Height-1,$top+$rows.Count)
+    for($y=0;$y -lt $Height;$y++){
+        $i=$y-$top
+        if($y -eq $promptY){[void]$frame.Append($leftPad+'> '+(' '*[Math]::Max(0,$Width-3-$leftPad.Length)))}
+        elseif($i -ge 0 -and $i -lt $rows.Count){[void]$frame.Append($leftPad+$rows[$i]+$rightPad)}
+        else{[void]$frame.Append($blank)}
+        if($y -lt $Height-1){[void]$frame.Append("`r`n")}
+    }
+    return @{Text=$frame.ToString();X=$leftPad.Length+2;Y=$promptY}
+}
+function Show-NovaDiagnostic {
+    param([int]$Id)
+    [Console]::Clear()
+    switch($Id){
+        22 {
+            Write-Host 'Live performance' -ForegroundColor Cyan
+            Write-Host 'Esc  Back'
+            $top=[Console]::CursorTop
+            while($true){
+                $cpu=Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'"
+                $os=Get-CimInstance Win32_OperatingSystem
+                $total=$os.TotalVisibleMemorySize / 1MB
+                $used=$total - $os.FreePhysicalMemory / 1MB
+                $cpuPct=[Math]::Min(100,[Math]::Max(0,[int]$cpu.PercentProcessorTime))
+                $cpuBar=[int][Math]::Round($cpuPct/5)
+                $ramBar=[Math]::Min(20,[Math]::Max(0,[int][Math]::Round(20*$used/$total)))
+                $lines=@('',
+                    ('CPU   [{0}{1}]  {2}%' -f ('#'*$cpuBar),('-'*(20-$cpuBar)),$cpuPct),
+                    ('RAM   [{0}{1}]  {2:N1} / {3:N1} GB' -f ('#'*$ramBar),('-'*(20-$ramBar)),$used,$total),
+                    '','Process                          Memory')
+                $lines+=@(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object {
+                    '{0,-28} {1,8:N0} MB' -f $_.ProcessName.Substring(0,[Math]::Min(28,$_.ProcessName.Length)),($_.WorkingSet64/1MB)
+                })
+                $w=[Math]::Min(60,[Math]::Max(1,[Console]::WindowWidth-1))
+                for($i=0;$i -lt $lines.Count -and $top+$i -lt [Console]::WindowHeight;$i++){
+                    [Console]::SetCursorPosition(0,$top+$i)
+                    [Console]::Write($lines[$i].PadRight($w).Substring(0,$w))
+                }
+                for($i=0;$i -lt 20;$i++){if([Console]::KeyAvailable -and [Console]::ReadKey($true).Key -eq 'Escape'){return};Start-Sleep -Milliseconds 50}
+            }
+        }
+        23 {
+            Write-Host 'Recent app crashes  /  last 7 days' -ForegroundColor Cyan
+            try {
+                $events=Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=(Get-Date).AddDays(-7)} -MaxEvents 12 -ErrorAction Stop
+                foreach($event in $events){
+                    $xml=[xml]$event.ToXml()
+                    $fields=@{}
+                    foreach($node in $xml.Event.EventData.Data){$fields[[string]$node.Name]=[string]$node.'#text'}
+                    $app=$fields['AppName'];if(!$app){$app=$event.Properties[0].Value}
+                    Write-Host ("{0:MMM d  h:mm tt}   {1}" -f $event.TimeCreated,$app)
+                    if($fields['ModuleName']){Write-Host ('    '+$fields['ModuleName']+'    '+$fields['ExceptionCode']) -ForegroundColor DarkGray}
+                }
+            } catch { if($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'){Write-Host 'No app crashes recorded.'}else{throw} }
+        }
+        24 {
+            Write-Host 'Connection check' -ForegroundColor Cyan
+            $active=@(Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq 'Up'})
+            if(!$active){Write-Host 'No active adapters.'}
+            foreach($adapter in $active){
+                Write-Host ($adapter.InterfaceAlias+'   '+($adapter.IPv4Address.IPAddress -join ', '))
+                foreach($gateway in $adapter.IPv4DefaultGateway){
+                    if(!$gateway){continue}
+                    $ping=New-Object Net.NetworkInformation.Ping
+                    try{$result=$ping.Send([string]$gateway.NextHop,1200);Write-Host ('Gateway   '+$gateway.NextHop+'   '+$result.Status)}
+                    catch{Write-Host ('Gateway   '+$gateway.NextHop+'   No ping reply')}finally{$ping.Dispose()}
+                }
+            }
+            try{$found=Resolve-DnsName example.com -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object IPAddress
+                if(!$found){throw 'No IPv4 address returned.'};Write-Host ('DNS       example.com   '+(@($found.IPAddress)[0]))}
+            catch{Write-Host ('DNS       '+$_.Exception.Message)}
+            try{$reply=Invoke-WebRequest -UseBasicParsing -Uri 'https://example.com' -Method Head -TimeoutSec 5 -ErrorAction Stop
+                Write-Host ('HTTPS     example.com   '+[int]$reply.StatusCode)}
+            catch{Write-Host ('HTTPS     '+$_.Exception.Message)}
+        }
+    }
+}
+function Start-NovaMenu {
+    $page=if($env:N0VA_PAGE -eq '2'){'2'}else{'1'}
+    $previous=$page
+    $cache=@{}
+    $typed='';$sequence='';$lastSize=''
+    $oldCursor=$true
+    try{$oldCursor=[Console]::CursorVisible}catch{}
+    try{
+        [Console]::CursorVisible=$false
+        if($env:N0VA_INTRO -eq '1'){[NovaDisplay]::Fullscreen();[NovaDisplay]::Intro($false,$color)}
+        while($true){
+            $w=[Console]::WindowWidth;$h=[Console]::WindowHeight
+            if($w -lt 5 -or $h -lt 2){throw 'Terminal window is too small.'}
+            $size="$w/$h"
+            if($lastSize -ne $size){
+                $cache.Clear()
+                foreach($p in '1','2','admin'){$cache[$p]=New-NovaFrame $p $w $h}
+                $lastSize=$size
+            }
+            $frame=$cache[$page]
+            [Console]::SetCursorPosition(0,[Console]::WindowTop)
+            [Console]::Write($frame.Text)
+            [Console]::SetCursorPosition($frame.X,[Console]::WindowTop+$frame.Y)
+            [Console]::Write($typed)
+            while(![Console]::KeyAvailable){
+                if([Console]::WindowWidth -ne $w -or [Console]::WindowHeight -ne $h){break}
+                Start-Sleep -Milliseconds 16
+            }
+            if(![Console]::KeyAvailable){continue}
+            $key=[Console]::ReadKey($true)
+            $ch=[char]::ToLowerInvariant($key.KeyChar)
+            if($page -ne 'admin'){
+                $sequence=($sequence+$ch)
+                if($sequence.Length -gt 8){$sequence=$sequence.Substring($sequence.Length-8)}
+                if($sequence.EndsWith('nnnn')){
+                    $previous=$page;$page='admin';$sequence='';$typed=''
+                    [NovaDisplay]::Intro($true,$color);continue
+                }
+                if($sequence.EndsWith('seemless')){$number=21}
+                elseif($key.Key -in @('A','LeftArrow','D','RightArrow')){
+                    $page=if($key.Key -in @('A','LeftArrow')){'1'}else{'2'}
+                    $typed='';$sequence='';continue
+                }else{$number=-1}
+            }else{
+                if($key.Key -eq 'Escape'){$page=$previous;$typed='';$sequence='';continue}
+                $number=-1
+            }
+            if($key.Key -eq 'Backspace' -and $typed.Length){$typed=$typed.Substring(0,$typed.Length-1)}
+            if($ch -ge '0' -and $ch -le '9' -and $typed.Length -lt 2){$typed+=$ch}
+            if($key.Key -eq 'Enter' -and $typed.Length){
+                $candidate=[int]$typed
+                if($candidate -eq 0 -or $pages[$page] -match ('^'+$candidate.ToString('00')+' ')){$number=$candidate}
+                $typed=''
+            }
+            if($number -lt 0){continue}
+            $typed='';$sequence=''
+            if($page -eq 'admin'){
+                if($number -eq 0){$page=$previous;continue}
+                if($number -le 3){$number+=21}
+                else{
+                    try{
+                        switch($number){
+                            4 {Start-Process eventvwr.msc}
+                            5 {Start-Process services.msc}
+                            6 {Start-Process taskmgr.exe}
+                        }
+                    }catch{Write-Host $_.Exception.Message;[void][Console]::ReadKey($true)}
+                    continue
+                }
+            }
+            if($number -in @(22,23,24)){
+                try{Show-NovaDiagnostic $number;if($number -eq 22){continue}}
+                catch{Write-Host $_.Exception.Message -ForegroundColor Yellow}
+                Write-Host 'Press a key to return.';[void][Console]::ReadKey($true);continue
+            }
+            if($number -eq 21){
+                $desktopFile=Join-Path $env:INSTALL_DIR 'SeemlessOS.ps1'
+                if(Test-Path -LiteralPath $desktopFile -PathType Leaf){
+                    $source=[IO.File]::ReadAllText($desktopFile)
+                    if($source.StartsWith('# N0VA desktop build: 2.1')){
+                        try{& ([scriptblock]::Create($source)) -InstallDir $env:INSTALL_DIR}
+                        catch{Write-Host $_.Exception.Message;[void][Console]::ReadKey($true)}
+                        continue
+                    }
+                }
+                # A distinct return code preserves the second hub page during first-use setup.
+                if($page -eq '2'){return 122}
+            }
+            return $number
+        }
+    }finally{[Console]::CursorVisible=$oldCursor}
+}
+if($env:N0VA_VIEW -eq 'menu'){exit (Start-NovaMenu)}
+if($env:N0VA_VIEW -eq 'diagnostic'){Show-NovaDiagnostic ([int]$env:choice)}

@@ -1,4 +1,4 @@
-# N0VA desktop build: 2.0
+# N0VA desktop build: 2.1
 # Seemless 0S MODE - N0VA's keyboard-driven terminal desktop.
 # Windows PowerShell 5.1+, no third-party modules required.
 [CmdletBinding()]
@@ -81,17 +81,9 @@ $script:SeemlessApps = @(
 )
 $script:SeemlessState = @{
     View='Desktop'; DesktopIndex=0; StartIndex=0; FileIndex=0; AppIndex=0; ControlIndex=0
-    Path=[Environment]::GetFolderPath('UserProfile'); Files=@(); AppQuery=''; Status='Choose an item with the arrows and Enter. S opens Start.'
-    Browser=$null; BrowserScroll=0; LinkIndex=0; LinkFocus=$false; History=(New-Object 'System.Collections.Generic.List[object]')
+    Path=[Environment]::GetFolderPath('UserProfile'); Files=@(); AppQuery=''; Status=''
     Modal=$null; Prompt=$null; Running=$true; Width=120; Height=40; Ansi=$false
 }
-$script:SeemlessBookmarks = @(
-    @{Name='N0VA on GitHub';Url='https://github.com/N0VALID/N0VA'},
-    @{Name='Python documentation';Url='https://docs.python.org/3/'},
-    @{Name='Wikipedia';Url='https://en.wikipedia.org/wiki/Main_Page'},
-    @{Name='RustDesk';Url='https://rustdesk.com/'},
-    @{Name='Microsoft PowerToys';Url='https://learn.microsoft.com/en-us/windows/powertoys/'}
-)
 function ConvertTo-SeemlessSafeText {
     param([AllowNull()][string]$Text)
     if (-not $Text) { return '' }
@@ -132,64 +124,174 @@ function Update-SeemlessFiles {
 }
 function Open-SeemlessView {
     param([string]$View)
+    if($View -eq 'Web'){Start-SeemlessBrowser;return}
     $script:SeemlessState.View=$View
     if($View -eq 'Explorer'){Update-SeemlessFiles;return}
-    $welcome=@{Desktop='Welcome home. Your files, apps and settings are right here.';Start='Choose what you would like to do.';Apps='Find an app, then select it to get started.';Control='Settings and information, without leaving your desktop.';Web='Read pages, follow links, or search the web.'}
-    if($welcome.ContainsKey($View)){Set-SeemlessStatus $welcome[$View]}
+    Set-SeemlessStatus ''
 }
-function Get-SeemlessPage {
-    param([string]$Address)
-    $Address=$Address.Trim()
-    if(-not $Address){throw 'Enter a URL or search words.'}
-    if($Address -notmatch '^https?://') {
-        if($Address -match '\s' -or $Address -notmatch '\.'){$Address='https://html.duckduckgo.com/html/?q='+[Uri]::EscapeDataString($Address)}
-        else{$Address='https://'+$Address}
+function Start-SeemlessBrowser {
+    $version='1.0.3537.50'
+    $cache=Join-Path $env:LOCALAPPDATA "N0VA\WebView2\$version"
+    $arch=if([IntPtr]::Size -eq 4){'x86'}elseif($env:PROCESSOR_ARCHITECTURE -eq 'ARM64'){'arm64'}else{'x64'}
+    $managed=Join-Path $cache 'lib\net462'
+    $core=Join-Path $managed 'Microsoft.Web.WebView2.Core.dll'
+    $forms=Join-Path $managed 'Microsoft.Web.WebView2.WinForms.dll'
+    $native=Join-Path $cache "runtimes\win-$arch\native"
+    if(!(Test-Path $core) -or !(Test-Path $forms) -or !(Test-Path (Join-Path $native 'WebView2Loader.dll'))){
+        Set-SeemlessStatus 'Downloading browser components...'
+        Show-SeemlessScreen
+        $stage=Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        try{
+            [void][IO.Directory]::CreateDirectory($stage)
+            $zip=Join-Path $stage 'sdk.zip'
+            [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -UseBasicParsing -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$version/microsoft.web.webview2.$version.nupkg" -OutFile $zip -TimeoutSec 90
+            if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne '5ea526bbd728adda0da4d31219267e96460494a427e4894c4e09d9f320f4b9aa'){throw 'The browser component download was incomplete or changed.'}
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+            try{
+                $files=@('lib/net462/Microsoft.Web.WebView2.Core.dll','lib/net462/Microsoft.Web.WebView2.WinForms.dll',"runtimes/win-$arch/native/WebView2Loader.dll")
+                foreach($file in $files){
+                    $target=Join-Path $cache $file
+                    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+                    $tmp=$target+'.'+[guid]::NewGuid().ToString()+'.tmp'
+                    try{
+                        [IO.Compression.ZipFileExtensions]::ExtractToFile($archive.GetEntry($file),$tmp)
+                        try{[IO.File]::Move($tmp,$target)}catch [IO.IOException]{if(!(Test-Path -LiteralPath $target)){throw}}
+                    }finally{if([IO.File]::Exists($tmp)){[IO.File]::Delete($tmp)}}
+                }
+            }finally{$archive.Dispose()}
+        }finally{if([IO.Directory]::Exists($stage)){[IO.Directory]::Delete($stage,$true)}}
     }
+    if(!('SeemlessBrowser' -as [type])){
+        Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+        [void][Reflection.Assembly]::LoadFrom($core)
+        [void][Reflection.Assembly]::LoadFrom($forms)
+        [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::SetLoaderDllFolderPath($native)
+        Add-Type -ReferencedAssemblies @('System.dll','System.Drawing.dll','System.Windows.Forms.dll',$core,$forms) -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+
+public sealed class SeemlessBrowser : Form {
+    readonly TabControl tabs = new TabControl();
+    readonly ToolStripTextBox address = new ToolStripTextBox();
+    readonly ToolStrip bar = new ToolStrip();
+    readonly ToolStripButton back, forward;
+    readonly string profile, proxy;
+    WebView2 ActiveView {
+        get { return tabs.SelectedTab == null ? null : tabs.SelectedTab.Tag as WebView2; }
+    }
+    public SeemlessBrowser(string profile, string proxy) {
+        this.profile = profile; this.proxy = proxy;
+        Text = "Seemless Browser"; Width = 1100; Height = 750;
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimumSize = new Size(580, 400);
+        tabs.Dock = DockStyle.Fill; Controls.Add(tabs);
+        bar.GripStyle = ToolStripGripStyle.Hidden;
+        bar.BackColor = Color.FromArgb(25,36,48); bar.ForeColor = Color.WhiteSmoke;
+        bar.Padding = new Padding(6,5,6,5);
+        back = Button("Back", delegate { if(ActiveView != null && ActiveView.CanGoBack) ActiveView.GoBack(); });
+        forward = Button("Forward", delegate { if(ActiveView != null && ActiveView.CanGoForward) ActiveView.GoForward(); });
+        Button("Reload", delegate { if(ActiveView != null && ActiveView.CoreWebView2 != null) ActiveView.Reload(); });
+        address.AutoSize = false;
+        address.ToolTipText = "Search or enter an address"; address.AccessibleName = address.ToolTipText;
+        address.KeyDown += (s,e) => {
+            if(e.KeyCode != Keys.Enter || ActiveView == null) return;
+            e.SuppressKeyPress = true;
+            var url = Destination(address.Text); if(url != null) ActiveView.Source = url;
+        };
+        bar.Items.Add(address);
+        Button("+ Tab", delegate { OpenTab(null); });
+        Button("Close tab", delegate { CloseTab(); });
+        Controls.Add(bar);
+        SizeChanged += delegate { address.Width = Math.Max(120, ClientSize.Width-370); };
+        tabs.SelectedIndexChanged += delegate { Sync(); };
+        Shown += delegate { address.Width=Math.Max(120, ClientSize.Width-370); OpenTab(null); };
+    }
+    ToolStripButton Button(string label, EventHandler action) {
+        var button = new ToolStripButton(label); button.Click += action; bar.Items.Add(button); return button;
+    }
+    static Uri Destination(string input) {
+        string text = (input ?? "").Trim(); if(text.Length==0) return null;
+        Uri u;
+        if(Uri.TryCreate(text, UriKind.Absolute, out u) && (u.Scheme=="http" || u.Scheme=="https")) return u;
+        if(text.IndexOfAny(new[]{' ','\t'}) < 0 && Uri.TryCreate("https://"+text,UriKind.Absolute,out u)
+            && (u.Host.Contains(".") || u.IsLoopback)) return u;
+        return new Uri("https://duckduckgo.com/?q="+Uri.EscapeDataString(text));
+    }
+    void Sync() {
+        var view = ActiveView;
+        var uri = view == null ? null : view.Source;
+        address.Text = uri == null || uri.AbsoluteUri=="about:blank" ? "" : uri.AbsoluteUri;
+        back.Enabled = view != null && view.CoreWebView2 != null && view.CanGoBack;
+        forward.Enabled = view != null && view.CoreWebView2 != null && view.CanGoForward;
+    }
+    protected override bool ProcessCmdKey(ref Message msg, Keys key) {
+        if(key==(Keys.Control|Keys.L)){ address.Focus(); address.SelectAll(); return true; }
+        if(key==(Keys.Control|Keys.T)){ OpenTab(null); return true; }
+        if(key==(Keys.Control|Keys.W)){ CloseTab(); return true; }
+        return base.ProcessCmdKey(ref msg,key);
+    }
+    void CloseTab() {
+        if(tabs.TabCount<=1){Close();return;}
+        var page=tabs.SelectedTab; tabs.TabPages.Remove(page); page.Dispose(); Sync();
+    }
+    void OpenTab(Uri first) {
+        var page=new TabPage("New tab");
+        var view=new WebView2(); view.Dock=DockStyle.Fill;
+        var properties=new CoreWebView2CreationProperties(); properties.UserDataFolder=profile;
+        if(!String.IsNullOrEmpty(proxy)) properties.AdditionalBrowserArguments="--proxy-server="+proxy;
+        view.CreationProperties=properties;
+        page.Tag=view; page.Controls.Add(view); tabs.TabPages.Add(page); tabs.SelectedTab=page;
+        view.CoreWebView2InitializationCompleted += (s,e) => {
+            if(view.IsDisposed) return;
+            if(!e.IsSuccess) {
+                MessageBox.Show(this,e.InitializationException.Message,"WebView2",MessageBoxButtons.OK,MessageBoxIcon.Error);
+                return;
+            }
+            var core=view.CoreWebView2;
+            core.DocumentTitleChanged += delegate {
+                var title=core.DocumentTitle;
+                if(String.IsNullOrWhiteSpace(title) || title=="about:blank") title="New tab";
+                page.Text=title.Substring(0,Math.Min(36,title.Length)).Replace("&","&&");
+            };
+            core.SourceChanged += delegate { if(ActiveView==view) Sync(); };
+            core.HistoryChanged += delegate { if(ActiveView==view) Sync(); };
+            core.NewWindowRequested += (sender,args) => {
+                args.Handled=true;
+                Uri url;
+                if(Uri.TryCreate(args.Uri,UriKind.Absolute,out url) && (url.Scheme=="https" || url.Scheme=="http"))
+                    BeginInvoke((Action)(() => OpenTab(url)));
+            };
+        };
+        view.Source=first ?? new Uri("about:blank"); address.Focus();
+    }
+}
+'@
+    }
+    try{[void][Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString($null)}
+    catch{throw 'Install Microsoft Edge WebView2 Runtime, then open Browser again.'}
+    $proxy=Get-SeemlessProxy
+    $window=New-Object SeemlessBrowser((Join-Path $env:LOCALAPPDATA 'N0VA\BrowserProfile'),$proxy)
+    try{Set-SeemlessStatus '';[void]$window.ShowDialog()}finally{$window.Dispose()}
+}
+function ConvertTo-SeemlessProxy {
+    param([string]$Value)
+    $Value=$Value.Trim()
+    if(!$Value){return ''}
     $uri=$null
-    if(-not [Uri]::TryCreate($Address,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -notin @('http','https')){throw 'Only http:// and https:// pages are supported.'}
-    [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $response=Invoke-WebRequest -UseBasicParsing -Uri $uri.AbsoluteUri -TimeoutSec 15 -MaximumRedirection 5 -UserAgent 'N0VA-SeemlessReader/1.0'
-    $html=[string]$response.Content
-    if($html.Length -gt 1500000){$html=$html.Substring(0,1500000)}
-    $baseUri=$uri
-    try{if($response.BaseResponse.ResponseUri){$baseUri=$response.BaseResponse.ResponseUri}elseif($response.BaseResponse.RequestMessage.RequestUri){$baseUri=$response.BaseResponse.RequestMessage.RequestUri}}catch{}
-    $titleMatch=[regex]::Match($html,'(?is)<title[^>]*>(.*?)</title>')
-    $title=[Net.WebUtility]::HtmlDecode([regex]::Replace($titleMatch.Groups[1].Value,'<[^>]+>',' ')).Trim()
-    if(-not $title){$title=$baseUri.Host}
-    $clean=[regex]::Replace($html,'(?is)<(script|style|noscript|svg)\b[^>]*>.*?</\1\s*>',' ')
-    $links=New-Object 'System.Collections.Generic.List[object]'
-    $seen=New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach($match in [regex]::Matches($clean,'(?is)<a\b[^>]*href\s*=\s*["'']([^"'']+)["''][^>]*>(.*?)</a>')) {
-        if($links.Count -ge 100){break}
-        $href=[Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
-        if($href.StartsWith('#')){continue}
-        $linkUri=$null
-        if(-not [Uri]::TryCreate($baseUri,$href,[ref]$linkUri) -or $linkUri.Scheme -notin @('http','https')){continue}
-        $label=[Net.WebUtility]::HtmlDecode([regex]::Replace($match.Groups[2].Value,'<[^>]+>',' '))
-        $label=(ConvertTo-SeemlessSafeText ([regex]::Replace($label,'\s+',' '))).Trim()
-        if($label -and $seen.Add($linkUri.AbsoluteUri)){$links.Add(@{Name=$label;Url=$linkUri.AbsoluteUri})}
-    }
-    $text=[regex]::Replace($clean,'(?is)</?(p|div|h[1-6]|li|tr|br|section|article|header|footer)\b[^>]*>',"`n")
-    $text=[Net.WebUtility]::HtmlDecode([regex]::Replace($text,'<[^>]+>',' '))
-    $text=ConvertTo-SeemlessSafeText $text
-    $text=[regex]::Replace($text,'[ \t]+',' ')
-    $text=[regex]::Replace($text,'(\r?\n\s*){3,}',"`n`n").Trim()
-    if(-not $text){$text='This page has no readable text. Press O to open it in your browser.'}
-    return @{Url=$baseUri.AbsoluteUri;Title=(ConvertTo-SeemlessSafeText $title);Text=$text;Links=@($links.ToArray())}
+    if($Value -notmatch '^(?:https?|socks5)://(?:\[[a-f0-9:]+\]|[a-z0-9.-]+):[0-9]{1,5}/?$' -or
+       ![uri]::TryCreate($Value,[UriKind]::Absolute,[ref]$uri) -or $uri.Port -lt 1){throw 'Use http://host:port, https://host:port, or socks5://host:port.'}
+    return ('{0}://{1}:{2}' -f $uri.Scheme,$uri.Host,$uri.Port)
 }
-function Open-SeemlessPage {
-    param([string]$Address,[switch]$NoHistory)
-    Set-SeemlessStatus 'Loading page... (15 second timeout)'
-    Show-SeemlessScreen
-    try {
-        $page=Get-SeemlessPage $Address
-        if($script:SeemlessState.Browser -and -not $NoHistory){
-            if($script:SeemlessState.History.Count -ge 20){$script:SeemlessState.History.RemoveAt(0)}
-            $script:SeemlessState.History.Add($script:SeemlessState.Browser)
-        }
-        $script:SeemlessState.Browser=$page;$script:SeemlessState.BrowserScroll=0;$script:SeemlessState.LinkIndex=0;$script:SeemlessState.LinkFocus=$false
-        Set-SeemlessStatus ('Loaded '+$page.Title+' | Tab: links  O: full browser')
-    }catch{Set-SeemlessStatus ('Web: '+$_.Exception.Message)}
+function Get-SeemlessProxy {
+    $file=Join-Path $InstallDir 'browser-proxy.txt'
+    if(Test-Path -LiteralPath $file){return ConvertTo-SeemlessProxy ([IO.File]::ReadAllText($file))}
+    return ''
 }
 function Start-SeemlessExternal {
     param([string]$Target)
@@ -235,7 +337,7 @@ $script:SeemlessState.InstallLog=@()
 $script:SeemlessState.SettingsCache=@{}
 $script:SeemlessState.SettingsScroll=0
 $script:SeemlessState.Theme='Ocean'
-$script:SeemlessControls=@(@{Name='This PC'},@{Name='Storage'},@{Name='Network'},@{Name='Running apps'},@{Name='Appearance'})
+$script:SeemlessControls=@(@{Name='This PC'},@{Name='Storage'},@{Name='Network'},@{Name='Running apps'},@{Name='Appearance'},@{Name='Browser proxy'})
 function Set-SeemlessTheme {
     param([string]$Name,[switch]$Save)
     switch($Name){
@@ -279,7 +381,8 @@ function Get-SeemlessSettingLines {
                 $lines.Add('APP                           MEMORY')
                 foreach($process in (Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 30)){$lines.Add(('{0,-28} {1,7:N0} MB' -f $process.ProcessName,($process.WorkingSet64/1MB)))}
             }
-            'Appearance' {$lines.Add('Choose the look of your desktop.');$lines.Add('');$lines.Add('Current theme: '+$script:SeemlessState.Theme);$lines.Add('');$lines.Add('Enter changes theme: Ocean / Emerald / Violet');$lines.Add('Your choice is saved automatically.')}
+            'Browser proxy' {$proxy=Get-SeemlessProxy;if(!$proxy){$proxy='System default'};$lines.Add($proxy);$lines.Add('Enter to change')}
+            'Appearance' {$lines.Add('Current theme: '+$script:SeemlessState.Theme);$lines.Add('');$lines.Add('Enter changes theme: Ocean / Emerald / Violet')}
         }
         if(-not $lines.Count){$lines.Add('No information available on this PC.')}
     }catch{$lines.Add('Some details are unavailable: '+$_.Exception.Message)}
@@ -321,7 +424,7 @@ function Start-SeemlessEditor {
     if(-not $lines.Count){$lines.Add('')}
     $script:SeemlessState.Document=@{Path=$Preview.Path;Name=$Preview.Name;Lines=$lines;CursorX=0;CursorY=0;Scroll=0;Dirty=$false;New=$false;Encoding=$Preview.Encoding;Newline="`n";LastWrite=$Preview.LastWrite}
     if($Preview.Text.Contains("`r`n")){$script:SeemlessState.Document.Newline="`r`n"}
-    $script:SeemlessState.View='Editor';Set-SeemlessStatus 'Your changes stay here until you save. Ctrl+S: save'
+    $script:SeemlessState.View='Editor';Set-SeemlessStatus 'Ctrl+S  Save'
 }
 function Save-SeemlessDocument {
     $doc=$script:SeemlessState.Document;$temporary=$null;$createdNew=$false
@@ -452,42 +555,40 @@ function Show-SeemlessScreen {
     # A quiet blue desktop with the familiar four-pane window motif.
     for($y=1;$y -lt $g.H-2;$y++){
         $offset=[int]($g.W*.55)+[int](6*[Math]::Sin($y/5.0))
-        $screen.Fill($offset,$y,[Math]::Max(0,$g.W-$offset),1,$c.Ink,(0x08264B+$y*256))
+        $screen.Fill($offset,$y,[Math]::Max(0,$g.W-$offset),1,$c.Ink,$c.Side)
     }
     $screen.Text(2,0,'N0VA  /  Seemless 0S MODE',$c.Accent,$c.Desktop)
-    $screen.Text([Math]::Max(2,$g.W-28),0,('Made by N0VALID  |  2.0'),$c.Muted,$c.Desktop)
+    $screen.Text([Math]::Max(2,$g.W-7),0,'v2.1',$c.Muted,$c.Desktop)
     $screen.Fill(0,$g.H-3,$g.W,1,$c.Muted,$c.Side)
     $screen.Text(2,$g.H-3,(ConvertTo-SeemlessSafeText $st.Status),$c.Muted,$c.Side)
     $screen.Fill(0,$g.H-2,$g.W,2,$c.Ink,0x0A1326)
-    $screen.Text(2,$g.H-2,'[S] Start    F2 Files    F3 Internet    F4 Apps    F5 Settings',$c.Ink,0x0A1326)
-    $screen.Text(2,$g.H-1,'Choose with arrows and Enter       Esc: back       F10: leave desktop',$c.Muted,0x0A1326)
-    $clock=(Get-Date).ToString('HH:mm  dd MMM')
-    if($g.W -gt 95){$screen.Text($g.W-$clock.Length-2,$g.H-2,$clock,$c.Accent,0x0A1326)}
+    $clock=(Get-Date).ToString('h:mm tt',[Globalization.CultureInfo]::InvariantCulture)
+    $taskbar=if($g.W -ge 78){'[S] Start    F2 Files    F3 Browser    F4 Apps    F5 Settings'}else{'[S] Start'}
+    $screen.Text(2,$g.H-2,$taskbar,$c.Ink,0x0A1326)
+    $screen.Text($g.W-$clock.Length-2,$g.H-2,$clock,$c.Accent,0x0A1326)
+    $screen.Text(2,$g.H-1,'Arrows / Enter    Esc  Back    F10  Exit',$c.Muted,0x0A1326)
     if($st.View -in @('Desktop','Start')) {
-        $screen.Text(5,4,'Welcome home.',$c.Ink,$c.Desktop)
-        $screen.Text(5,6,'Your files, apps and settings. All right here.',$c.Muted,$c.Desktop)
-        $cards=@('Files','Internet','Apps','Settings')
+        $cards=@('Files','Browser','Apps','Settings')
         for($i=0;$i -lt 4;$i++){
-            $y=9+$i*2;if($y -ge $g.H-5){break}
+            $y=4+$i*3;if($y -ge $g.H-5){break}
             $bg=$c.Desktop;$fg=$c.Ink;if($st.DesktopIndex -eq $i){$bg=$c.Select;$fg=$c.Accent}
             $screen.Fill(4,$y,28,1,$fg,$bg);$screen.Text(5,$y,('[ '+($i+1)+' ]  '+$cards[$i]),$fg,$bg)
         }
         if($g.W -ge 95){
             $wx=[int]($g.W*.65);$wy=[int]($g.H*.3)
-            $screen.Fill($wx,$wy,10,4,$c.Ink,0x1387F5);$screen.Fill($wx+11,$wy,10,4,$c.Ink,0x37ACF8)
-            $screen.Fill($wx,$wy+5,10,4,$c.Ink,0x0F6BD6);$screen.Fill($wx+11,$wy+5,10,4,$c.Ink,0x1686EB)
-            $screen.Text($wx,$wy+11,'Seemless 0S MODE',$c.Accent,0x08264B)
+            $screen.Fill($wx,$wy,10,4,$c.Ink,$c.Blue);$screen.Fill($wx+11,$wy,10,4,$c.Ink,$c.Accent)
+            $screen.Fill($wx,$wy+5,10,4,$c.Ink,$c.Select);$screen.Fill($wx+11,$wy+5,10,4,$c.Ink,$c.Blue)
+
         }
         if($st.View -eq 'Start') {
             $sx=3;$sy=[Math]::Max(3,$g.H-19);$sw=[Math]::Min(43,$g.W-6)
             Draw-SeemlessBox $screen $sx $sy $sw 14 'Start'
             $screen.Text($sx+2,$sy+2,'PINNED',$c.Muted,$c.Panel)
-            $startItems=@(@{Name='Files'},@{Name='Internet'},@{Name='Apps'},@{Name='Settings'},@{Name='Leave desktop'})
+            $startItems=@(@{Name='Files'},@{Name='Browser'},@{Name='Apps'},@{Name='Settings'},@{Name='Leave desktop'})
             Draw-SeemlessList $screen $startItems $st.StartIndex ($sx+2) ($sy+4) ($sw-4) 6 'Start'
-            $screen.Text($sx+2,$sy+11,'N0VALID       Your terminal workspace',$c.Accent,$c.Panel)
         }
     }else{
-        $titles=@{Explorer='Files';Web='Internet';Apps='Apps';Control='Settings';Preview='Quick look';Editor='Notes';Install='App download'}
+        $titles=@{Explorer='Files';Apps='Apps';Control='Settings';Preview='Quick look';Editor='Notes';Install='App download'}
         Draw-SeemlessBox $screen $g.X $g.Y $g.WW $g.WH $titles[$st.View]
         switch($st.View){
             'Explorer' {
@@ -498,7 +599,7 @@ function Show-SeemlessScreen {
             }
             'Apps' {
                 $apps=@(Get-SeemlessVisibleApps)
-                $screen.Text($g.BodyX,5,('Find something useful   |   '+$(if($st.AppQuery){$st.AppQuery}else{'all apps'})),$c.Accent,$c.Panel)
+                $screen.Text($g.BodyX,5,$(if($st.AppQuery){'Search: '+$st.AppQuery}else{'All apps'}),$c.Accent,$c.Panel)
                 $listWidth=$g.BodyW
                 if($g.W -gt 110){$listWidth=[int]($g.BodyW*.57)}
                 Draw-SeemlessList $screen $apps $st.AppIndex $g.BodyX $g.BodyY $listWidth $g.BodyH 'Apps'
@@ -513,11 +614,10 @@ function Show-SeemlessScreen {
                 $screen.Text($g.BodyX,$g.H-6,'/ Search   Enter Install selected app   R Reset search',$c.Muted,$c.Side)
             }
             'Control' {
-                $screen.Text($g.BodyX,5,'Make this desktop yours. Learn about this PC.',$c.Accent,$c.Panel)
                 $category=$script:SeemlessControls[$st.ControlIndex].Name
                 $detail=@(Get-SeemlessSettingLines $category)
                 $left=[Math]::Min(23,[int]($g.BodyW*.3))
-                Draw-SeemlessList $screen $script:SeemlessControls $st.ControlIndex $g.BodyX $g.BodyY $left ([Math]::Min(5,$g.BodyH)) 'Control'
+                Draw-SeemlessList $screen $script:SeemlessControls $st.ControlIndex $g.BodyX $g.BodyY $left ([Math]::Min($script:SeemlessControls.Count,$g.BodyH)) 'Control'
                 $dx=$g.BodyX+$left+2;$dw=$g.BodyW-$left-2
                 $wrapped=@(Get-SeemlessLines ([string]::Join("`n",$detail)) $dw)
                 $st.SettingsScroll=[Math]::Min($st.SettingsScroll,[Math]::Max(0,$wrapped.Count-$g.BodyH))
@@ -552,36 +652,13 @@ function Show-SeemlessScreen {
                 $message=$st.InstallResult
                 if($st.InstallJob){$message='Installing... You can keep using your desktop.'}
                 $screen.Text($g.BodyX,7,$message,$c.Green,$c.Panel)
-                $screen.Text($g.BodyX,9,'Your download stays here. No extra terminal windows.',$c.Muted,$c.Panel)
                 $logs=@($st.InstallLog|Select-Object -Last ([Math]::Max(1,$g.BodyH-5)))
                 if($st.InstallResult -and $st.InstallResult -notmatch 'is ready'){
                     for($i=0;$i -lt $logs.Count;$i++){$screen.Text($g.BodyX,12+$i,$logs[$i],$c.Muted,$c.Panel)}
                 }elseif($st.InstallJob){$tick=[int]((Get-Date).Second%4);$screen.Text($g.BodyX,12,(@('Working   .','Working  ..','Working ...','Working  ..')[$tick]),$c.Accent,$c.Panel)}
                 $screen.Text($g.BodyX,$g.H-6,'Esc: apps    F2: files    F5: settings',$c.Muted,$c.Side)
             }
-            'Web' {
-                $address='Start page';if($st.Browser){$address=$st.Browser.Url}
-                $screen.Text($g.BodyX,5,('Address: '+$address),$c.Accent,$c.Panel)
-                $screen.Text($g.BodyX,$g.H-6,'L Address/search  B Back  Tab Links  O Full browser  PgUp/PgDn',$c.Muted,$c.Side)
-                if(-not $st.Browser){
-                    $screen.Text($g.BodyX,7,'Browse readable pages without leaving the terminal.',$c.Ink,$c.Panel)
-                    $screen.Text($g.BodyX,8,'Interactive sites and logins: press O for your full browser.',$c.Muted,$c.Panel)
-                    Draw-SeemlessList $screen $script:SeemlessBookmarks $st.LinkIndex $g.BodyX 10 $g.BodyW ([Math]::Max(1,$g.BodyH-3)) 'Links'
-                }elseif($st.LinkFocus){
-                    $screen.Text($g.BodyX,6,('LINKS - '+$st.Browser.Title),$c.Muted,$c.Panel)
-                    Draw-SeemlessList $screen $st.Browser.Links $st.LinkIndex $g.BodyX $g.BodyY $g.BodyW $g.BodyH 'Links'
-                }else{
-                    $wrapWidth=$g.BodyW-1
-                    if($st.Browser.WrappedWidth -ne $wrapWidth){
-                        $st.Browser.WrappedLines=@(Get-SeemlessLines $st.Browser.Text $wrapWidth)
-                        $st.Browser.WrappedWidth=$wrapWidth
-                    }
-                    $lines=$st.Browser.WrappedLines
-                    $st.BrowserScroll=[Math]::Min($st.BrowserScroll,[Math]::Max(0,$lines.Count-$g.BodyH))
-                    for($row=0;$row -lt $g.BodyH -and ($row+$st.BrowserScroll) -lt $lines.Count;$row++){$screen.Text($g.BodyX,$g.BodyY+$row,$lines[$row+$st.BrowserScroll],$c.Ink,$c.Panel)}
-                    $screen.Text($g.BodyX,6,('READER - '+$st.Browser.Title),$c.Muted,$c.Panel)
-                }
-            }
+
         }
     }
     if($st.Modal -or $st.Prompt){
@@ -624,7 +701,12 @@ function Invoke-SeemlessPrompt {
     switch($prompt.Kind){
         'Location' {Update-SeemlessFiles $prompt.Value}
         'Search' {$st.AppQuery=$prompt.Value.Trim();$st.AppIndex=0}
-        'Address' {Open-SeemlessPage $prompt.Value}
+        'Proxy' {
+            $value=ConvertTo-SeemlessProxy $prompt.Value
+            [void][IO.Directory]::CreateDirectory($InstallDir)
+            [IO.File]::WriteAllText((Join-Path $InstallDir 'browser-proxy.txt'),$value)
+            $st.SettingsCache=@{};Set-SeemlessStatus 'Browser proxy saved.'
+        }
         'NewText' {New-SeemlessItem $prompt.Value}
         'NewFolder' {New-SeemlessItem $prompt.Value -Folder}
     }
@@ -702,6 +784,9 @@ function Invoke-SeemlessKey {
             $st.ControlIndex=[Math]::Max(0,[Math]::Min($script:SeemlessControls.Count-1,$st.ControlIndex+$delta))
             if($delta){$st.SettingsScroll=0}
             if($Key.Key -eq 'R'){$st.SettingsCache=@{}}
+            if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Browser proxy'){
+                Start-SeemlessPrompt Proxy 'Browser proxy' 'http://host:port, or leave blank for system default.' (Get-SeemlessProxy)
+            }
             if($Key.Key -eq 'PageDown'){$st.SettingsScroll += 5};if($Key.Key -eq 'PageUp'){$st.SettingsScroll=[Math]::Max(0,$st.SettingsScroll-5)}
             if($Key.Key -eq 'Enter' -and $script:SeemlessControls[$st.ControlIndex].Name -eq 'Appearance'){
                 $themes=@('Ocean','Emerald','Violet');$next=($themes.IndexOf($st.Theme)+1)%3;Set-SeemlessTheme $themes[$next] -Save;$st.SettingsCache=@{}
@@ -714,22 +799,7 @@ function Invoke-SeemlessKey {
             if($Key.Key -eq 'PageDown'){$st.Preview.Scroll += [Math]::Max(1,$st.Height-13)}
             if($Key.Key -eq 'PageUp'){$st.Preview.Scroll=[Math]::Max(0,$st.Preview.Scroll-[Math]::Max(1,$st.Height-13))}
         }
-        'Web' {
-            switch($Key.Key){
-                'L' {Start-SeemlessPrompt Address 'Address or search' 'Enter https://example.com or search words.'}
-                'B' {if($st.History.Count){$st.Browser=$st.History[$st.History.Count-1];$st.History.RemoveAt($st.History.Count-1)}else{$st.Browser=$null};$st.BrowserScroll=0;$st.LinkIndex=0;$st.LinkFocus=$false}
-                'O' {$url=if($st.Browser){$st.Browser.Url}else{$script:SeemlessBookmarks[$st.LinkIndex].Url};Start-SeemlessExternal $url}
-                'Tab' {$st.LinkFocus=-not $st.LinkFocus}
-                'Home' {$st.BrowserScroll=0;$st.LinkIndex=0}
-                'PageDown' {$st.BrowserScroll += [Math]::Max(1,$st.Height-13)}
-                'PageUp' {$st.BrowserScroll=[Math]::Max(0,$st.BrowserScroll-[Math]::Max(1,$st.Height-13))}
-            }
-            if(-not $st.Browser -or $st.LinkFocus){
-                $links=$script:SeemlessBookmarks;if($st.Browser){$links=$st.Browser.Links}
-                $st.LinkIndex=[Math]::Max(0,[Math]::Min([Math]::Max(0,$links.Count-1),$st.LinkIndex+$delta))
-                if($Key.Key -eq 'Enter' -and $links.Count){Open-SeemlessPage $links[$st.LinkIndex].Url}
-            }else{$st.BrowserScroll=[Math]::Max(0,$st.BrowserScroll+$delta)}
-        }
+
     }
 }
 function Start-SeemlessOS {
