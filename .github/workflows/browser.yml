@@ -1,0 +1,100 @@
+name: N0VA Browser Windows build
+on:
+  workflow_dispatch:
+  push:
+    paths: ['browser/**', '.github/workflows/browser.yml']
+  pull_request:
+    paths: ['browser/**', '.github/workflows/browser.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify third-party downloads
+        shell: pwsh
+        run: ./browser/scripts/prepare.ps1
+      - name: Policy and settings tests
+        run: dotnet run --project browser/tests/PolicyTests.csproj -c Release
+      - name: Build Windows x64 app
+        run: dotnet publish browser/src/NovaBrowser.csproj -c Release -r win-x64 --self-contained true -p:RestoreLockedMode=true -o browser/out
+      - name: Native browser integration check
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path 'browser/out/N0VA Browser.exe'
+          $check = Start-Process $exe -ArgumentList '--check-runtime' -PassThru -Wait
+          if ($check.ExitCode -ne 0) {
+            Start-Process 'browser/vendor/MicrosoftEdgeWebview2Setup.exe' -ArgumentList '/silent /install' -Wait
+          }
+          $test = Start-Process $exe -ArgumentList '--smoke-test' -PassThru
+          if (!$test.WaitForExit(150000)) { $test.Kill(); throw 'Native smoke test timed out' }
+          Get-Content browser/out/smoke-result.txt
+          if ($test.ExitCode -ne 0) { throw 'Native browser test failed' }
+      - name: Save integration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-test-evidence
+          path: |
+            browser/out/smoke-result.txt
+            browser/out/smoke.png
+          if-no-files-found: warn
+      - name: Build setup wizard
+        shell: pwsh
+        run: |
+          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png -ErrorAction SilentlyContinue
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
+          if ($LASTEXITCODE) { throw 'Installer compilation failed' }
+      - name: Test installation and desktop shortcut
+        shell: pwsh
+        run: |
+          $setup = Get-Item browser/artifacts/*.exe
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=desktopicon /LOG=browser-install.log' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { Get-Content browser-install.log; throw 'Installer failed' }
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs/N0VA Browser/N0VA Browser.exe'
+          if (!(Test-Path $installed)) { throw 'Installed executable missing' }
+          $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'N0VA Browser.lnk'
+          $shell = New-Object -ComObject WScript.Shell
+          if (!(Test-Path $link) -or $shell.CreateShortcut($link).TargetPath -ne $installed.Replace('/','\')) { throw 'Desktop shortcut missing or wrong target' }
+          $check = Start-Process $installed -ArgumentList '--check-runtime' -PassThru -Wait
+          if ($check.ExitCode -ne 0) { throw 'Installed runtime check failed' }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($setup.Name)" | Set-Content browser/artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: N0VA-Browser-Windows-x64
+          path: browser/artifacts/*
+          if-no-files-found: error
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: N0VA-Browser-Windows-x64
+          path: release
+      - name: Publish tested preview installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          tag="browser-preview-${COMMIT_SHA:0:8}"
+          cat > notes.txt <<'NOTES'
+          Windows x64 preview of N0VA Browser. Download the Setup.exe and run the wizard; it creates a desktop shortcut. The Microsoft WebView2 runtime is installed if needed.
+
+          Includes official uBlock Origin Lite, strict tracking prevention, page-download discovery, saved personalization, temporary browsing data by default, and idle-tab suspension. Direct file links may open a browser preview (for example PDFs); dynamically generated links are discovered only once the website exposes them.
+
+          This is an unsigned, unaudited preview. It is not Brave/LibreWolf-equivalent hardening. Microsoft runtime updates are automatic; N0VA and bundled filters need a new app release. See browser/README.md and browser/SECURITY.md for limits and build instructions. SHA256SUMS.txt accompanies the installer.
+          NOTES
+          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.1.0 preview" --prerelease --notes-file notes.txt

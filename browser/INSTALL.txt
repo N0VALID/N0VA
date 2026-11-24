@@ -1,0 +1,11 @@
+N0VA Browser — Windows preview
+
+Setup installs N0VA Browser for your Windows account and creates Start-menu and desktop shortcuts. No administrator access is normally needed.
+
+Microsoft Edge WebView2 Runtime is required. If missing, setup runs Microsoft's signed bootstrapper, which needs an internet connection. The .NET runtime is included.
+
+This is an early browser build, not an audited replacement for Brave or LibreWolf. It includes official uBlock Origin Lite (not full uBlock Origin), strict tracking prevention, HTTPS navigation by default and temporary browsing data by default.
+
+The setup executable is currently unsigned. Verify its SHA-256 against the matching GitHub build. Do not disable Windows security protections to install it.
+
+Uninstall through Windows Settings > Apps. Your preferences, saved browsing profile and downloaded files are preserved. To remove browser data yourself, close the browser and delete %LOCALAPPDATA%\N0VA\Browser. Do not delete the containing N0VA directory; it contains other N0VA tools.
