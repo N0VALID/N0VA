@@ -66,7 +66,9 @@ internal static class Smoke
                 deadline = DateTime.UtcNow.AddSeconds(20);
                 while ((!File.Exists(savedFile) || new FileInfo(savedFile).Length != 21) && DateTime.UtcNow < deadline) await Task.Delay(100);
                 if (!pickerCalled || !File.Exists(savedFile) || File.ReadAllText(savedFile) != "N0VA download fixture") throw new Exception("Confirmed download did not save correctly");
-                await Task.Delay(300);
+                deadline = DateTime.UtcNow.AddSeconds(60);
+                while (window.ActiveDownloadCount > 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (window.ActiveDownloadCount > 0) throw new Exception("Download did not finish its runtime checks");
                 if (!File.ReadAllText(savedFile + ":Zone.Identifier").Contains("ZoneId=3")) throw new Exception("Internet zone marker missing");
                 // A canceled save must not create the requested file.
                 pickerCalled = false;

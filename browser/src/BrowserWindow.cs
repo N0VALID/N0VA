@@ -47,6 +47,7 @@ internal sealed partial class BrowserWindow : Form
     internal Preferences Preferences => prefs;
     internal bool BlockerReady => blockerReady;
     internal bool IntegrationTest;
+    internal int ActiveDownloadCount => activeDownloads.Count;
     internal string ProfileDirectory => profileDirectory;
 
     public BrowserWindow(string root, Preferences? initial = null)
@@ -89,7 +90,7 @@ internal sealed partial class BrowserWindow : Form
                     try { t.Suspended = await t.View.CoreWebView2.TrySuspendAsync(); } catch (Exception) { /* Closing tabs can race suspension. */ }
         };
         FormClosing += (_, e) => {
-            if (activeDownloads.Count > 0 && MessageBox.Show(this, "Downloads are still running. Cancel them and close?", "Close N0VA Browser", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
+            if (!IntegrationTest && activeDownloads.Count > 0 && MessageBox.Show(this, "Downloads are still running. Cancel them and close?", "Close N0VA Browser", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
             closing = true; idle.Stop(); foreach (var d in activeDownloads.ToArray()) d.Cancel();
         };
         FormClosed += (_, _) => { idle.Dispose(); foreach (var t in tabs.TabPages.OfType<SiteTab>()) t.View?.Dispose(); };
