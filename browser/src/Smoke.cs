@@ -19,17 +19,26 @@ internal static class Smoke
         _ = Task.Run(async () => {
             try {
                 while (!cancel.IsCancellationRequested) {
-                    using var client = await listener.AcceptTcpClientAsync(cancel.Token);
+                    var client = await listener.AcceptTcpClientAsync(cancel.Token);
+                    // Chromium may preconnect on one socket and send the actual request
+                    // on another. Handle each socket independently.
+                    _ = Task.Run(async () => {
+                    using var connection = client;
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel.Token);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                    try {
                     using var stream = client.GetStream();
                     using var reader = new StreamReader(stream, leaveOpen: true);
-                    var request = await reader.ReadLineAsync(cancel.Token);
-                    while (await reader.ReadLineAsync(cancel.Token) is { Length: > 0 }) { }
+                    var request = await reader.ReadLineAsync(timeout.Token);
+                    while (await reader.ReadLineAsync(timeout.Token) is { Length: > 0 }) { }
                     var html = "<title>N0VA fixture</title><a href='/app.zip'>app</a><a href='/app.zip'>duplicate</a><a download='manual.pdf' href='/get?id=2'>manual</a><a download href='javascript:alert(1)'>bad</a>";
                     var attachment = request?.StartsWith("GET /app.zip ") == true;
                     if (attachment) html = "N0VA download fixture";
                     var contentType = attachment ? "application/octet-stream\r\nContent-Disposition: attachment; filename=app.zip" : "text/html";
                     var bytes = Encoding.UTF8.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nConnection: close\r\nContent-Length: " + Encoding.UTF8.GetByteCount(html) + "\r\n\r\n" + html);
-                    await stream.WriteAsync(bytes, cancel.Token);
+                    await stream.WriteAsync(bytes, timeout.Token);
+                    } catch (OperationCanceledException) { } catch (IOException) { }
+                    });
                 }
             } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
         });
@@ -45,7 +54,7 @@ internal static class Smoke
                 var c = t.View!.CoreWebView2;
                 var deadline = DateTime.UtcNow.AddSeconds(40);
                 while (c.DocumentTitle != "N0VA fixture" && DateTime.UtcNow < deadline) await Task.Delay(100);
-                if (c.DocumentTitle != "N0VA fixture") throw new Exception("Fixture did not load");
+                if (c.DocumentTitle != "N0VA fixture") throw new Exception("Fixture did not load. URL: " + c.Source + "; title: " + c.DocumentTitle);
                 if (!window.BlockerReady || !(await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled && x.Name.Contains("uBlock", StringComparison.OrdinalIgnoreCase))) throw new Exception("Blocker not enabled");
                 if (c.Profile.PreferredTrackingPreventionLevel != CoreWebView2TrackingPreventionLevel.Strict || c.Settings.IsWebMessageEnabled || c.Settings.AreHostObjectsAllowed || !c.Settings.IsReputationCheckingRequired) throw new Exception("Privacy settings missing");
                 var links = await window.ScanFiles(t);
