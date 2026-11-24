@@ -20,4 +20,14 @@
   <Target Name="RemoveUnusedWpfReference" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>
   </Target>
+  <Target Name="CopyRedistributionNotices" AfterTargets="Publish">
+    <ItemGroup>
+      <RuntimeLegal Include="%(ResolvedRuntimePack.PackageDirectory)/LICENSE*;%(ResolvedRuntimePack.PackageDirectory)/THIRD-PARTY-NOTICES*">
+        <Pack>%(ResolvedRuntimePack.Identity)</Pack>
+      </RuntimeLegal>
+      <WebViewLegal Include="$(NuGetPackageRoot)microsoft.web.webview2/1.0.3537.50/LICENSE.txt;$(NuGetPackageRoot)microsoft.web.webview2/1.0.3537.50/NOTICE.txt" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RuntimeLegal)" DestinationFolder="$(PublishDir)licenses/runtime/%(RuntimeLegal.Pack)" />
+    <Copy SourceFiles="@(WebViewLegal)" DestinationFolder="$(PublishDir)licenses/webview2" />
+  </Target>
 </Project>

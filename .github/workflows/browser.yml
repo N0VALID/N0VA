@@ -49,6 +49,7 @@ jobs:
       - name: Build setup wizard
         shell: pwsh
         run: |
+          if (!(Test-Path browser/out/licenses/webview2/LICENSE.txt) -or !(Get-ChildItem browser/out/licenses/runtime -Recurse -Filter THIRD-PARTY-NOTICES.TXT)) { throw 'Redistribution notices missing' }
           Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png -ErrorAction SilentlyContinue
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
           if ($LASTEXITCODE) { throw 'Installer compilation failed' }
@@ -98,3 +99,8 @@ jobs:
           This is an unsigned, unaudited preview. It is not Brave/LibreWolf-equivalent hardening. Microsoft runtime updates are automatic; N0VA and bundled filters need a new app release. See browser/README.md and browser/SECURITY.md for limits and build instructions. SHA256SUMS.txt accompanies the installer.
           NOTES
           gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.1.0 preview" --prerelease --notes-file notes.txt
+          # Retire the initial preview from this implementation session, which
+          # predates bundling the runtime license files. Replacement is already live.
+          if gh release view browser-preview-314016a3 >/dev/null 2>&1; then
+            gh release delete browser-preview-314016a3 --yes --cleanup-tag
+          fi
