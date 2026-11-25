@@ -44,6 +44,13 @@ jobs:
           if (!$test.WaitForExit(120000)) { $test.Kill(); throw 'Proxy smoke test timed out' }
           Get-Content browser/out/proxy-result.txt
           if ($test.ExitCode -ne 0) { throw 'Proxy routing test failed' }
+      - name: Large file and installer download regression
+        shell: pwsh
+        run: |
+          $test = Start-Process 'browser/out/N0VA Browser.exe' -ArgumentList '--download-smoke-test' -PassThru
+          if (!$test.WaitForExit(210000)) { $test.Kill(); Get-Content browser/out/download-result.txt -ErrorAction SilentlyContinue; throw 'Download regression timed out' }
+          Get-Content browser/out/download-result.txt
+          if ($test.ExitCode -ne 0) { throw 'Download regression failed' }
       - name: Save integration evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -56,6 +63,11 @@ jobs:
             browser/out/connection.png
             browser/out/background.png
             browser/out/downloads.png
+            browser/out/home-live.png
+            browser/out/settings-live.png
+            browser/out/download-live.png
+            browser/out/transfer-live.png
+            browser/out/download-result.txt
             browser/out/settings-error.txt
             browser/out/proxy-result.txt
           if-no-files-found: warn
@@ -63,7 +75,7 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path browser/out/licenses/webview2/LICENSE.txt) -or !(Get-ChildItem browser/out/licenses/runtime -Recurse -Filter THIRD-PARTY-NOTICES.TXT)) { throw 'Redistribution notices missing' }
-          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt,browser/out/settings.png,browser/out/settings-error.txt,browser/out/connection.png,browser/out/background.png,browser/out/downloads.png -ErrorAction SilentlyContinue
+          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt,browser/out/settings.png,browser/out/settings-error.txt,browser/out/connection.png,browser/out/background.png,browser/out/downloads.png,browser/out/home-live.png,browser/out/settings-live.png,browser/out/download-live.png,browser/out/transfer-live.png,browser/out/download-result.txt -ErrorAction SilentlyContinue
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
           if ($LASTEXITCODE) { throw 'Installer compilation failed' }
       - name: Test installation and desktop shortcut
@@ -107,12 +119,12 @@ jobs:
           cat > notes.txt <<'NOTES'
           Windows x64 preview of N0VA Browser. Download the Setup.exe and run the wizard; it creates a desktop shortcut. The Microsoft WebView2 runtime is installed if needed.
 
-          Smaller rounded home card, transparent wallpaper footer controls, a compact stats badge, corrected corner painting, and hover/menu effects. Favorites have directly clickable icons, and the bookmark star sits beside the address field. Search choices include DuckDuckGo, Brave Search, Google and Bing. Ctrl+T/Ctrl+W now work inside web content, and F11 enters/leaves fullscreen.
+          Fixes downloads that appeared stuck at the full byte count: native browser download prompts stay visible, pending finalization is labeled clearly, interruptions show their reason, and runtime state is reconciled even if an event is missed. Browser details opens the native panel for an unfinished transfer. Reputation checks remain enabled; receiving all bytes never forces completion.
 
-          Site files refreshes automatically while open, finds dynamic and open-shadow links, highlights download buttons, and offers Epic's Windows launcher on Fortnite/Epic pages. Proxy routes are tested before saving; unavailable routes show actionable feedback. Use Windows connection and Restart now help recover from a previously unavailable proxy. Tor/Mullvad still require their external service to be running.
+          Fixes live button-painting corruption and overlapping letters/checkboxes by using supported transparent-background painting. Search and missing favorite icons use clear symbols. Windows checks include a 46 MB download, the previous N0VA installer, pause/resume/cancel, and actual screen captures.
 
           Includes official uBlock Origin Lite, strict tracking prevention, site-file and GitHub release discovery, favorites, local download history, saved backgrounds/themes and proxy presets. Presets require your own working VPN/proxy; no service subscription or Tor client is bundled. Connection changes apply after restart.
 
           This is an unsigned, unaudited preview. It is not Brave/LibreWolf-equivalent hardening. Microsoft runtime updates are automatic; N0VA can offer a newer installer; run it to update the app and bundled filters. See browser/README.md and browser/SECURITY.md for limits and build instructions. SHA256SUMS.txt accompanies the installer.
           NOTES
-          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.4.0 preview" --prerelease --notes-file notes.txt
+          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.4.1 preview" --prerelease --notes-file notes.txt

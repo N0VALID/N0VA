@@ -6,6 +6,8 @@ internal sealed class SoftButton : Button
 {
     public static bool MotionEnabled = true;
     public Color FillColor = Color.Empty;
+    public string Glyph = "";
+    public bool FilledGlyph;
     float hover;
     bool hovered;
     readonly System.Windows.Forms.Timer motion = new() { Interval = 16 };
@@ -25,7 +27,9 @@ internal sealed class SoftButton : Button
         var size = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         return new Size(Math.Max(MinimumSize.Width, size.Width + 28 + (Image == null ? 0 : 24)), Math.Max(MinimumSize.Height, size.Height + 14));
     }
-    protected override void OnPaintBackground(PaintEventArgs e) => SoftSurface.PaintBehind(this, e, InvokePaintBackground, InvokePaint);
+    // Let WinForms composite a transparent child. Manually invoking a parent's
+    // paint handler with a translated Graphics corrupts live native/GDI painting.
+    protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -34,7 +38,12 @@ internal sealed class SoftButton : Button
         using var brush = new SolidBrush(fill); e.Graphics.FillPath(brush, path);
         var textBox = new Rectangle(8, 2, Width - 16, Height - 4);
         if (Image != null) { var x = Text.Length == 0 ? (Width - 22) / 2 : 12; e.Graphics.DrawImage(Image, x, (Height - 22) / 2, 22, 22); textBox.X += 28; textBox.Width -= 28; }
-        if (Text.Length > 0) TextRenderer.DrawText(e.Graphics, Text, Font, textBox, Enabled ? ForeColor : SystemColors.GrayText, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        if (Glyph.Length > 0) { var size = Math.Min(20, Math.Min(Width - 8, Height - 4)); UiIcons.Draw(e.Graphics, Glyph, new Rectangle((Width - size) / 2, (Height - size) / 2, size, size), Enabled ? ForeColor : SystemColors.GrayText, FilledGlyph); }
+        if (Text.Length > 0) {
+            using var ink = new SolidBrush(Enabled ? ForeColor : SystemColors.GrayText);
+            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            e.Graphics.DrawString(Text, Font, ink, textBox, format);
+        }
         if (Focused && ShowFocusCues) { using var pen = new Pen(Color.FromArgb(120, ForeColor)); e.Graphics.DrawPath(pen, path); }
     }
 }
@@ -56,14 +65,6 @@ internal sealed class SoftSurface : SmoothPanel
     public Color FillColor = Color.FromArgb(20, Color.White);
     public int Radius = 20;
     public SoftSurface() { SetStyle(ControlStyles.SupportsTransparentBackColor, true); BackColor = Color.Transparent; }
-    internal static void PaintBehind(Control control, PaintEventArgs e, Action<Control, PaintEventArgs> background, Action<Control, PaintEventArgs> foreground)
-    {
-        if (control.Parent == null) return;
-        var state = e.Graphics.Save();
-        e.Graphics.TranslateTransform(-control.Left, -control.Top);
-        var pe = new PaintEventArgs(e.Graphics, control.Bounds);
-        background(control.Parent, pe); foreground(control.Parent, pe); e.Graphics.Restore(state);
-    }
     public static GraphicsPath Shape(Rectangle r, int radius)
     {
         var path = new GraphicsPath(); var d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
@@ -71,7 +72,7 @@ internal sealed class SoftSurface : SmoothPanel
         path.AddArc(r.Left, r.Top, d, d, 180, 90); path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
         path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90); path.CloseFigure(); return path;
     }
-    protected override void OnPaintBackground(PaintEventArgs e) => PaintBehind(this, e, InvokePaintBackground, InvokePaint);
+    protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -82,7 +83,7 @@ internal sealed partial class BrowserWindow
 {
     readonly SmoothPanel chrome = new() { Dock = DockStyle.Top, Height = 58 };
     readonly SoftSurface addressHost = new() { Height = 38, Padding = new Padding(12, 8, 12, 8) };
-    readonly SoftButton searchProvider = new() { Text = "D", Dock = DockStyle.Left, Width = 30, AccessibleName = "Choose search engine" };
+    readonly SoftButton searchProvider = new() { Glyph = "Search", Dock = DockStyle.Left, Width = 30, AccessibleName = "Choose search engine" };
     readonly ToolStrip toolsBar = new() { GripStyle = ToolStripGripStyle.Hidden, AutoSize = false, Dock = DockStyle.None, Height = 40, Padding = Padding.Empty, RenderMode = ToolStripRenderMode.System };
     readonly Dictionary<string, ToolStripButton> toolItems = [];
     readonly ToolStripDropDown downloadPopup = new() { Padding = new Padding(1), AutoClose = true };

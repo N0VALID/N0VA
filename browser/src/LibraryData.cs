@@ -8,6 +8,10 @@ internal sealed class Transfer
     public string Path { get; set; } = "";
     public string Source { get; set; } = "";
     public string State { get; set; } = "Interrupted";
+    public long BytesReceived { get; set; }
+    public long TotalBytes { get; set; }
+    public string InterruptReason { get; set; } = "";
+    public DateTime LastProgress { get; set; } = DateTime.UtcNow;
     public DateTime Started { get; set; } = DateTime.UtcNow;
 }
 internal sealed class Library
@@ -20,7 +24,7 @@ internal sealed class Library
             var library = JsonSerializer.Deserialize<Library>(File.ReadAllText(file)) ?? new();
             library.Bookmarks = (library.Bookmarks ?? []).Where(b => b != null && Policy.WebUrl(b.Url, true)).Take(300).ToList();
             library.Transfers = (library.Transfers ?? []).Where(d => d != null).Take(100).ToList();
-            foreach (var item in library.Transfers.Where(d => d.State is "InProgress" or "Paused")) item.State = "Interrupted";
+            foreach (var item in library.Transfers.Where(d => d.State is "InProgress" or "Paused")) { item.State = "Interrupted"; item.InterruptReason = "BrowserClosed"; }
             return library;
         } catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return new(); }
     }

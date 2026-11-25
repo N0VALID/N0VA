@@ -146,6 +146,7 @@ internal static class Smoke
                 deadline = DateTime.UtcNow.AddSeconds(10);
                 while (!pickerCalled && DateTime.UtcNow < deadline) await Task.Delay(100);
                 if (!pickerCalled) throw new Exception("Download cancellation path not reached");
+                c.CloseDefaultDownloadDialog();
                 var before = c.Source;
                 await window.Navigate(t, "file:///C:/Windows/win.ini");
                 if (c.Source != before) throw new Exception("Privileged scheme accepted");
@@ -168,6 +169,7 @@ internal static class Smoke
                             nav.Controls.OfType<Button>().Single(b => b.Text == "Appearance").PerformClick();
                             var body = settings.Controls.OfType<FlowLayoutPanel>().Single(p => p.Dock == DockStyle.Fill);
                             body.Controls.OfType<ComboBox>().ElementAt(1).SelectedItem = "Blue"; body.Controls.OfType<ComboBox>().Last().SelectedItem = "Google";
+                            settings.Refresh(); Application.DoEvents(); Cursor.Position = body.Controls.OfType<Button>().Last().PointToScreen(new Point(15, 15)); Application.DoEvents(); LiveCapture.Save(settings, "settings-live.png");
                             using var settingsShot = new Bitmap(settings.Width, settings.Height); settings.DrawToBitmap(settingsShot, new Rectangle(0, 0, settings.Width, settings.Height)); settingsShot.Save(Path.Combine(AppContext.BaseDirectory, "settings.png"));
                             body.Controls.OfType<Button>().Single(b => b.Text == "Save preferences").PerformClick();
                         } catch (Exception error) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "settings-error.txt"), error.ToString()); settings.Close(); }
@@ -248,6 +250,7 @@ internal static class Smoke
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png"));
                 using (var background = new Bitmap(800, 600)) { using var g = Graphics.FromImage(background); using var brush = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 800, 600), Color.FromArgb(75, 130, 156), Color.FromArgb(158, 95, 115), 35f); g.FillRectangle(brush, 0, 0, 800, 600); background.Save(Path.Combine(root, "background.jpg"), System.Drawing.Imaging.ImageFormat.Jpeg); }
                 window.Preferences.Background = true; window.AddTab(); await Task.Delay(200);
+                Cursor.Position = window.PointToScreen(new Point(window.ClientSize.Width - 60, window.ClientSize.Height - 35)); await Task.Delay(250); LiveCapture.Save(window, "home-live.png");
                 using (var backgroundShot = new Bitmap(window.Width, window.Height)) { window.DrawToBitmap(backgroundShot, new Rectangle(Point.Empty, backgroundShot.Size)); backgroundShot.Save(Path.Combine(AppContext.BaseDirectory, "background.png")); }
                 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, redirect compatibility (HTTP/same-site/file chains) and cross-site script/meta blocking, blocker toggle, runtime block counter, favorites/history, release detection, credits, animation and resize, saved settings, toolbar visibility/order, home outside website tabs, popup geometry, Connection failure/save, update No option, native web-focused Ctrl+T/Ctrl+W/F11, cached favicon navigation, live Site files/shadow DOM scanning, Google selection, wallpaper overlays.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
                 result = 0;

@@ -19,8 +19,8 @@ internal sealed partial class BrowserWindow
         foreach (var item in favoriteBar.Items.Cast<ToolStripItem>().ToArray()) { item.Image?.Dispose(); item.Dispose(); }
         favoriteBar.Items.Clear(); favoriteBar.BackColor = Surface; favoriteBar.ForeColor = Ink;
         foreach (var favorite in library.Bookmarks.Take(20)) {
-            var image = ReadFavoriteIcon(favorite.Url);
-            var button = new ToolStripButton { Image = image, Text = image == null ? new Uri(favorite.Url).IdnHost[..1].ToUpperInvariant() : "", DisplayStyle = image == null ? ToolStripItemDisplayStyle.Text : ToolStripItemDisplayStyle.Image, AutoSize = false, Width = 34, Height = 30, AccessibleName = favorite.Title, ToolTipText = favorite.Title + "\n" + new Uri(favorite.Url).IdnHost };
+            var image = ReadFavoriteIcon(favorite.Url) ?? UiIcons.Create("Globe", Ink);
+            var button = new ToolStripButton { Image = image, DisplayStyle = ToolStripItemDisplayStyle.Image, AutoSize = false, Width = 34, Height = 30, AccessibleName = favorite.Title, ToolTipText = favorite.Title + "\n" + new Uri(favorite.Url).IdnHost };
             button.Click += (_, _) => _ = Navigate(Current!, favorite.Url); favoriteBar.Items.Add(button);
         }
         favoriteBar.Visible = prefs.ShowFavorites && favoriteBar.Items.Count > 0;
@@ -38,7 +38,7 @@ internal sealed partial class BrowserWindow
             bytes.Position = 0; using var decoded = Image.FromStream(bytes);
             if (decoded.Width > 512 || decoded.Height > 512) return;
             tab.Favicon?.Dispose(); tab.Favicon = new Bitmap(decoded, 24, 24); SaveFavicon(tab);
-        } catch (Exception) { /* A missing/invalid website icon uses its initial instead. */ }
+        } catch (Exception) { /* A missing/invalid website icon uses a globe instead. */ }
     }
     void SaveFavicon(SiteTab tab)
     {

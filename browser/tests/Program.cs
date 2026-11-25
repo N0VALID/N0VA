@@ -100,3 +100,15 @@ Check(routeCheck.Success && routeCheck.Message.Contains("203.0.113.8"), "Connect
 Check((await serveProbe)?.StartsWith("GET http://probe.invalid/check ") == true, "Connection test uses selected proxy"); proxyListener.Stop();
 Check(!(await ConnectionProbe.Check(probeEndpoint, "http://probe.invalid/check")).Success, "Unavailable proxy test fails");
 Console.WriteLine($"{count} total checks passed.");
+
+var receiving = new Transfer { State = "InProgress", BytesReceived = 46 * 1048576, TotalBytes = 46 * 1048576 };
+Check(DownloadStatus.Describe(receiving, DateTime.UtcNow).Contains("Waiting for the browser"), "Full byte count must not claim completion");
+receiving.State = "Completed";
+Check(DownloadStatus.Describe(receiving, DateTime.UtcNow) == "Completed · saved", "Only runtime completion is final");
+receiving.State = "Interrupted"; receiving.InterruptReason = "FileSecurityCheckFailed";
+Check(DownloadStatus.Describe(receiving, DateTime.UtcNow).Contains("security check"), "Security failure is explained");
+receiving.InterruptReason = "FileNoSpace";
+Check(DownloadStatus.Describe(receiving, DateTime.UtcNow).Contains("disk space"), "Disk failure is explained");
+receiving.State = "Canceled";
+Check(DownloadStatus.Describe(receiving, DateTime.UtcNow) == "Canceled", "Canceled state is not generic interrupted");
+Console.WriteLine($"{count} total checks passed.");

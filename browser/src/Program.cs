@@ -11,9 +11,9 @@ internal static class Program
             try { using var process = System.Diagnostics.Process.GetProcessById(previous); process.WaitForExit(10000); } catch (ArgumentException) { }
         }
         ApplicationConfiguration.Initialize();
-        if (args.Contains("--smoke-test") || args.Contains("--proxy-smoke-test")) {
+        if (args.Contains("--smoke-test") || args.Contains("--proxy-smoke-test") || args.Contains("--download-smoke-test")) {
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-            try { return args.Contains("--proxy-smoke-test") ? ProxySmoke.Run() : Smoke.Run(); }
+            try { return args.Contains("--download-smoke-test") ? DownloadSmoke.Run() : args.Contains("--proxy-smoke-test") ? ProxySmoke.Run() : Smoke.Run(); }
             catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); return 1; }
         }
         using var mutex = new Mutex(true, @"Local\N0VALID.NovaBrowser", out var first);

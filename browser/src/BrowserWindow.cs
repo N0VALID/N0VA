@@ -35,7 +35,7 @@ internal sealed partial class BrowserWindow : Form
     readonly SiteTab homePage = new() { Text = "N0VA" };
     readonly ToolStripStatusLabel status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     readonly ToolStripButton back, forward, reload, files, antiRedirect;
-    readonly SoftButton bookmark = new() { Text = "☆", Width = 32, AccessibleName = "Bookmark page", TabStop = true };
+    readonly SoftButton bookmark = new() { Glyph = "Star", Width = 32, AccessibleName = "Bookmark page", TabStop = true };
     readonly string connection;
     readonly StatusStrip statusBar = new();
     readonly Panel downloads = new() { Dock = DockStyle.Right, Width = 390, Visible = false, Padding = new Padding(16) };
@@ -108,7 +108,7 @@ internal sealed partial class BrowserWindow : Form
             if (!IntegrationTest && activeDownloads.Count > 0 && MessageBox.Show(this, "Downloads are still running. Cancel them and close?", "Close N0VA Browser", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
             closing = true; idle.Stop(); foreach (var d in activeDownloads.ToArray()) d.Cancel();
         };
-        FormClosed += (_, _) => { idle.Dispose(); fileScanTimer.Dispose(); favoriteTips.Dispose(); downloadPopup.Dispose(); toolsMenu?.Dispose(); wallpaper?.Dispose(); foreach (var t in tabs.TabPages.OfType<SiteTab>()) { t.View?.Dispose(); t.Favicon?.Dispose(); } };
+        FormClosed += (_, _) => { idle.Dispose(); fileScanTimer.Dispose(); transferPoll.Dispose(); favoriteTips.Dispose(); downloadPopup.Dispose(); toolsMenu?.Dispose(); wallpaper?.Dispose(); foreach (var t in tabs.TabPages.OfType<SiteTab>()) { t.View?.Dispose(); t.Favicon?.Dispose(); } };
         BuildDownloads(); ApplyTheme(); AddTab(); Fit(); idle.Start();
         Shown += async (_, _) => { if (prefs.Animations && !IntegrationTest) PlayIntro(); if (!IntegrationTest && prefs.CheckUpdates) { await Task.Delay(1800); if (!closing) await CheckForUpdate(false); } };
     }
@@ -131,12 +131,12 @@ internal sealed partial class BrowserWindow : Form
     void Sync()
     {
         statusBar.Visible = !fullscreen && Current?.Ready == true;
-        searchProvider.Text = prefs.SearchEngine[..1]; address.PlaceholderText = "Search " + prefs.SearchEngine + " or enter address";
+        favoriteTips.SetToolTip(searchProvider, "Search engine: " + prefs.SearchEngine); address.PlaceholderText = "Search " + prefs.SearchEngine + " or enter address";
         var t = Current; var c = t?.Ready == true ? t.View!.CoreWebView2 : null;
         back.Enabled = c?.CanGoBack == true; forward.Enabled = c?.CanGoForward == true; reload.Enabled = c != null;
         if (!address.Focused) address.Text = c?.Source == "about:blank" ? "" : c?.Source ?? t?.Pending ?? "";
         files.Available = c != null && Policy.WebUrl(c.Source, true); bookmark.Enabled = files.Available;
-        bookmark.Text = c != null && library.Bookmarks.Any(b => b.Url == c.Source) ? "★" : "☆";
+        bookmark.FilledGlyph = c != null && library.Bookmarks.Any(b => b.Url == c.Source); bookmark.Invalidate();
         Text = (c == null ? "N0VA Browser" : c.DocumentTitle + " — N0VA Browser");
         status.Text = (privateSession ? "Temporary session" : "Saved browsing data") + "  ·  " +
             (blockerReady ? (prefs.BlockAds ? "uBlock Origin Lite active" : "Ad blocking off") + " · Strict tracking prevention" : "Protection loads before your first website") +
@@ -150,7 +150,7 @@ internal sealed partial class BrowserWindow : Form
     {
         downloadPopup.Close(); tabs.SelectedIndex = -1; ShowHome(homePage); address.Text = ""; address.Focus(); Sync(); return homePage;
     }
-    void CloseTab(SiteTab t) { if (t == homePage) return; scanGeneration++; tabs.TabPages.Remove(t); t.View?.Dispose(); t.Favicon?.Dispose(); t.Dispose(); if (tabs.TabCount == 0) AddTab(); Sync(); }
+    void CloseTab(SiteTab t) { if (t == homePage) return; if (HasActiveDownload(t)) { Notice("Finish or cancel this tab’s download before closing it."); ShowTransfers(); return; } scanGeneration++; tabs.TabPages.Remove(t); t.View?.Dispose(); t.Favicon?.Dispose(); t.Dispose(); if (tabs.TabCount == 0) AddTab(); Sync(); }
     async Task NavigateInput()
     {
         try { var target = Policy.Destination(address.Text, prefs.SearchEngine); if (target.Length > 0) await Navigate(Current ?? AddTab(), target); }
@@ -219,7 +219,8 @@ internal sealed partial class BrowserWindow : Form
         c.DocumentTitleChanged += (_, _) => LabelTab(t); c.SourceChanged += (_, _) => { if (t == Current) Sync(); };
         c.HistoryChanged += (_, _) => { if (t == Current) Sync(); };
         c.NavigationCompleted += async (_, e) => { t.Loading = false; t.Guard.Completed(e.NavigationId); LabelTab(t); if (!e.IsSuccess) { Notice("Page load failed: " + e.WebErrorStatus); if (connection.Length > 0 && e.WebErrorStatus is CoreWebView2WebErrorStatus.CannotConnect or CoreWebView2WebErrorStatus.ServerUnreachable or CoreWebView2WebErrorStatus.Disconnected) BeginInvoke((Action)(() => ShowConnectionError(t))); } if (t == Current && DownloadsOpen) await RefreshFiles(); };
-        c.DownloadStarting += (_, e) => DownloadStarting(e);
+        c.DownloadStarting += (_, e) => DownloadStarting(t, e);
+        c.IsDefaultDownloadDialogOpenChanged += (_, _) => { if (c.IsDefaultDownloadDialogOpen) downloadPopup.Close(); };
         c.ProcessFailed += (_, _) => Notice("A browser process stopped. Close this tab and open a new one.");
         blocker ??= Blocker.Enable(c.Profile, extensionPath, prefs.BlockAds); await blocker;
         blockerReady = true; t.Ready = true;

@@ -8,7 +8,15 @@ internal sealed partial class BrowserWindow
     readonly FlowLayoutPanel transfers = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
     readonly HashSet<CoreWebView2DownloadOperation> pausedDownloads = [];
     readonly Dictionary<Transfer, CoreWebView2DownloadOperation> transferOperations = [];
-    readonly Dictionary<Transfer, (Label Text, Button Pause, Button Cancel)> transferControls = [];
+    readonly Dictionary<Transfer, (Label Text, Button Pause, Button Cancel, Button Folder, Button Details)> transferControls = [];
+    readonly Dictionary<Transfer, SiteTab> transferOwners = [];
+    readonly System.Windows.Forms.Timer transferPoll = new() { Interval = 500 };
+    internal Func<string, bool>? TestExecutableConsent;
+    internal bool LastDownloadUsesRuntimeUi;
+    internal bool TestSuppressDownloadEvents;
+    internal IReadOnlyList<Transfer> DownloadRecords => library.Transfers;
+    internal void ReconcileDownloads() { foreach (var (record, operation) in transferOperations.ToArray()) RefreshTransfer(record, operation); }
+    internal void DownloadDetails(Transfer record) => OpenDownloadDetails(record);
     readonly Label panelTitle = new() { AutoSize = true, Font = new Font("Segoe UI", 20), Margin = new Padding(0, 8, 0, 8) };
     readonly Label panelHint = new() { Width = 345, Height = 44 };
     bool siteFilesMode = true;
@@ -22,6 +30,7 @@ internal sealed partial class BrowserWindow
     internal const string ScanScript = DownloadDiscovery.Script;
     void BuildDownloads()
     {
+        transferPoll.Tick += (_, _) => ReconcileDownloads();
         var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 108, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         var titleRow = new Panel { Width = 360, Height = 40 };
         panelTitle.Font = new Font("Segoe UI", 18); panelTitle.Location = new Point(0, 3); titleRow.Controls.Add(panelTitle);
@@ -38,7 +47,7 @@ internal sealed partial class BrowserWindow
         if (site) fileScanTimer.Start(); else fileScanTimer.Stop();
     }
     void ToggleDownloads() { if (DownloadsOpen && siteFilesMode) { downloadPopup.Close(); return; } lastScan = ""; PanelMode(true); _ = RefreshFiles(); }
-    internal void ShowTransfers() { PanelMode(false); RenderTransfers(); }
+    internal void ShowTransfers() { if (Current?.Ready == true) Current.View!.CoreWebView2.CloseDefaultDownloadDialog(); ReconcileDownloads(); PanelMode(false); RenderTransfers(); }
     internal async Task<List<PageFile>> ScanFiles(SiteTab t)
     {
         if (!t.Ready) return [];
@@ -97,32 +106,77 @@ internal sealed partial class BrowserWindow
         transferControls.Clear(); ClearControls(transfers);
         if (library.Transfers.Count == 0) transfers.Controls.Add(Caption("No downloads yet. Your completed files will appear here."));
         foreach (var item in library.Transfers) {
-            var row = new FlowLayoutPanel { Width = 340, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0, 8, 0, 12) };
-            var label = new Label { Width = 330, Height = 55, UseMnemonic = false, Text = item.Name + "\n" + item.State + " · " + item.Started.ToLocalTime().ToString("g") }; row.Controls.Add(label);
-            var actions = new FlowLayoutPanel { Width = 330, Height = 48 };
-            var pause = ActionButton("Pause", () => { if (transferOperations.TryGetValue(item, out var op)) { if (pausedDownloads.Contains(op) || op.CanResume) { pausedDownloads.Remove(op); op.Resume(); } else { pausedDownloads.Add(op); op.Pause(); } UpdateTransfer(item, op); } });
-            var cancel = ActionButton("Cancel", () => { if (transferOperations.TryGetValue(item, out var op)) { pausedDownloads.Remove(op); activeDownloads.Remove(op); op.Cancel(); UpdateTransfer(item, op); SaveLibrary(); } });
-            pause.Visible = cancel.Visible = false; actions.Controls.Add(pause); actions.Controls.Add(cancel);
-            var folder = ActionButton("Show in folder", () => { var directory = Path.GetDirectoryName(item.Path); if (Directory.Exists(directory)) Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = "\"" + directory + "\"", UseShellExecute = true }); else Notice("That download folder no longer exists."); }); actions.Controls.Add(folder);
-            row.Controls.Add(actions); transferControls[item] = (label, pause, cancel); transfers.Controls.Add(row);
-            if (transferOperations.TryGetValue(item, out var operation)) UpdateTransfer(item, operation);
+            var row = new FlowLayoutPanel { Width = 350, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0, 8, 0, 12) };
+            var label = new Label { Width = 342, AutoSize = true, MaximumSize = new Size(342, 0), UseMnemonic = false }; row.Controls.Add(label);
+            var actions = new FlowLayoutPanel { Width = 342, AutoSize = true, MaximumSize = new Size(342, 0), WrapContents = true };
+            var pause = ActionButton("Pause", () => {
+                if (!transferOperations.TryGetValue(item, out var op)) return;
+                try { if (pausedDownloads.Contains(op) || op.CanResume) { pausedDownloads.Remove(op); op.Resume(); } else { pausedDownloads.Add(op); op.Pause(); } RefreshTransfer(item, op); } catch (Exception ex) { Notice(ex.Message); }
+            });
+            var cancel = ActionButton("Cancel", () => {
+                if (!transferOperations.TryGetValue(item, out var op)) return;
+                pausedDownloads.Remove(op); op.Cancel(); RefreshTransfer(item, op);
+            });
+            var folder = ActionButton("Show in folder", () => {
+                var directory = Path.GetDirectoryName(item.Path);
+                if (File.Exists(item.Path) && Directory.Exists(directory)) Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { "/select,", item.Path }, UseShellExecute = true });
+                else Notice("The downloaded file is no longer at its saved location.");
+            });
+            var details = ActionButton("Browser details", () => OpenDownloadDetails(item));
+            actions.Controls.Add(pause); actions.Controls.Add(cancel); actions.Controls.Add(details); actions.Controls.Add(folder);
+            row.Controls.Add(actions); transferControls[item] = (label, pause, cancel, folder, details); transfers.Controls.Add(row);
+            PaintTransfer(item);
         }
     }
-    void UpdateTransfer(Transfer record, CoreWebView2DownloadOperation operation)
+    void PaintTransfer(Transfer record)
     {
-        record.State = pausedDownloads.Contains(operation) ? "Paused" : operation.State.ToString();
-        if (transferControls.TryGetValue(record, out var controls) && !controls.Text.IsDisposed) {
-            var total = operation.TotalBytesToReceive;
-            controls.Text.Text = record.Name + "\n" + record.State + (operation.State == CoreWebView2DownloadState.InProgress ? $" · {operation.BytesReceived / 1048576d:0.0} MB" + (total > 0 ? $" / {total / 1048576d:0.0} MB" : "") : "");
-            controls.Pause.Visible = operation.State == CoreWebView2DownloadState.InProgress || operation.CanResume;
-            controls.Pause.Text = pausedDownloads.Contains(operation) || operation.State == CoreWebView2DownloadState.Interrupted ? "Resume" : "Pause";
-            controls.Cancel.Visible = operation.State == CoreWebView2DownloadState.InProgress;
-        }
+        if (!transferControls.TryGetValue(record, out var controls) || controls.Text.IsDisposed) return;
+        controls.Text.Text = record.Name + "\n" + DownloadStatus.Describe(record, DateTime.UtcNow);
+        var live = transferOperations.TryGetValue(record, out var operation) && transferOwners.TryGetValue(record, out var owner) && !owner.IsDisposed;
+        controls.Pause.Visible = live && record.State is not ("Completed" or "Canceled") && (record.State is "InProgress" or "Paused" || operation!.CanResume);
+        controls.Pause.Text = record.State is "Paused" or "Interrupted" ? "Resume" : "Pause";
+        controls.Cancel.Visible = live && record.State is "InProgress" or "Paused";
+        controls.Folder.Visible = record.State == "Completed"; controls.Folder.Enabled = File.Exists(record.Path);
+        controls.Details.Visible = live && record.State != "Completed";
     }
-    void DownloadStarting(CoreWebView2DownloadStartingEventArgs e)
+    void RefreshTransfer(Transfer record, CoreWebView2DownloadOperation operation)
     {
-        e.Handled = true; var deferral = e.GetDeferral();
-        try { BeginInvoke((Action)(() => { try { if (closing) e.Cancel = true; else ConfirmDownload(e); } catch (Exception ex) { e.Cancel = true; Notice("Download canceled: " + ex.Message); } finally { deferral.Complete(); } })); }
+        if (closing || IsDisposed) return;
+        if (record.State is "Completed" or "Canceled") { PaintTransfer(record); return; }
+        var old = record.State; var oldReason = record.InterruptReason;
+        try {
+            var state = operation.State;
+            var reason = state == CoreWebView2DownloadState.Interrupted ? operation.InterruptReason.ToString() : "";
+            if (state == CoreWebView2DownloadState.Completed || state == CoreWebView2DownloadState.Interrupted && reason != "UserPaused") pausedDownloads.Remove(operation);
+            record.State = state == CoreWebView2DownloadState.Completed ? "Completed" : reason == "UserCanceled" ? "Canceled" : pausedDownloads.Contains(operation) ? "Paused" : state.ToString();
+            record.InterruptReason = reason;
+            var received = operation.BytesReceived;
+            if (record.BytesReceived != received) record.LastProgress = DateTime.UtcNow;
+            record.BytesReceived = received; record.TotalBytes = Convert.ToInt64(operation.TotalBytesToReceive);
+            if (record.State is "InProgress" or "Paused") activeDownloads.Add(operation); else activeDownloads.Remove(operation);
+            if (record.State == "Completed" && old != "Completed") {
+                try { File.WriteAllText(record.Path + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n"); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        } catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ObjectDisposedException) {
+            activeDownloads.Remove(operation); pausedDownloads.Remove(operation); record.State = "Interrupted"; record.InterruptReason = "BrowserClosed";
+        }
+        PaintTransfer(record);
+        if (record.State != old || record.InterruptReason != oldReason) SaveLibrary();
+        if (activeDownloads.Count > 0) transferPoll.Start(); else transferPoll.Stop();
+    }
+    void OpenDownloadDetails(Transfer record)
+    {
+        if (!transferOwners.TryGetValue(record, out var tab) || tab.IsDisposed || !tab.Ready) { Notice("The original download tab is closed."); return; }
+        downloadPopup.Close(); tabs.SelectedTab = tab; tab.View!.Visible = true; tab.Home?.Dispose(); tab.Home = null;
+        tab.View.CoreWebView2.OpenDefaultDownloadDialog();
+    }
+    bool HasActiveDownload(SiteTab tab) => transferOwners.Any(x => x.Value == tab && x.Key.State is "InProgress" or "Paused");
+    void DownloadStarting(SiteTab tab, CoreWebView2DownloadStartingEventArgs e)
+    {
+        // The runtime must retain its UI for SmartScreen decisions and errors.
+        // Receiving every byte is not the same as completing the download.
+        e.Handled = false; var deferral = e.GetDeferral();
+        try { BeginInvoke((Action)(() => { try { if (closing) e.Cancel = true; else ConfirmDownload(tab, e); } catch (Exception ex) { e.Cancel = true; Notice("Download canceled: " + ex.Message); } finally { deferral.Complete(); } })); }
         catch { e.Cancel = true; deferral.Complete(); }
     }
     internal Func<string, string, string?>? TestDownloadPicker;
@@ -132,27 +186,22 @@ internal sealed partial class BrowserWindow
         using var dialog = new SaveFileDialog { FileName = name, Title = "Save from " + source, OverwritePrompt = true, Filter = "All files|*.*" };
         return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
     }
-    void ConfirmDownload(CoreWebView2DownloadStartingEventArgs e)
+    void ConfirmDownload(SiteTab tab, CoreWebView2DownloadStartingEventArgs e)
     {
-        e.Handled = true; var operation = e.DownloadOperation; var name = Policy.SafeFileName(e.ResultFilePath);
+        e.Handled = false; LastDownloadUsesRuntimeUi = true; var operation = e.DownloadOperation; var name = Policy.SafeFileName(e.ResultFilePath);
         if (!Policy.WebUrl(operation.Uri, prefs.AllowHttp)) { e.Cancel = true; Notice("Download blocked: unsupported or unencrypted source."); return; }
         if (activeDownloads.Count >= 4) { e.Cancel = true; Notice("Four downloads are active. Wait for one to finish."); return; }
-        if (Policy.RiskyFile(name) && MessageBox.Show(this, name + " can run code or change your computer.\n\nSource: " + new Uri(operation.Uri).IdnHost + "\nOnly save it if you trust the publisher.", "Save executable file?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) { e.Cancel = true; return; }
+        if (Policy.RiskyFile(name) && !(IntegrationTest && TestExecutableConsent != null ? TestExecutableConsent(name) : MessageBox.Show(this, name + " can run code or change your computer.\n\nSource: " + new Uri(operation.Uri).IdnHost + "\nOnly save it if you trust the publisher.", "Save executable file?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK)) { e.Cancel = true; return; }
         var savedPath = ChooseDownloadPath(name, new Uri(operation.Uri).IdnHost); if (savedPath == null) { e.Cancel = true; return; }
         e.ResultFilePath = savedPath; activeDownloads.Add(operation);
         var record = new Transfer { Name = name, Path = savedPath, Source = new Uri(operation.Uri).GetLeftPart(UriPartial.Authority), State = "InProgress" };
         library.Transfers.Insert(0, record); while (library.Transfers.Count > 100) library.Transfers.RemoveAt(library.Transfers.Count - 1);
-        transferOperations[record] = operation; SaveLibrary(); ShowTransfers();
-        var last = DateTime.MinValue;
-        operation.BytesReceivedChanged += (_, _) => { if (DateTime.UtcNow - last > TimeSpan.FromMilliseconds(150) && !closing) { last = DateTime.UtcNow; UpdateTransfer(record, operation); } };
-        operation.StateChanged += (_, _) => {
-            if (IsDisposed) return;
-            if (operation.State == CoreWebView2DownloadState.InProgress || pausedDownloads.Contains(operation)) activeDownloads.Add(operation); else activeDownloads.Remove(operation);
-            if (operation.State == CoreWebView2DownloadState.Completed) {
-                try { File.WriteAllText(savedPath + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n"); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            }
-            UpdateTransfer(record, operation); SaveLibrary();
-        };
-        UpdateTransfer(record, operation);
+        transferOperations[record] = operation; transferOwners[record] = tab; SaveLibrary();
+        var lastRefresh = DateTime.MinValue;
+        operation.BytesReceivedChanged += (_, _) => { if (IntegrationTest && TestSuppressDownloadEvents) return; if (DateTime.UtcNow - lastRefresh < TimeSpan.FromMilliseconds(150)) return; lastRefresh = DateTime.UtcNow; RefreshTransfer(record, operation); };
+        operation.StateChanged += (_, _) => { if (!(IntegrationTest && TestSuppressDownloadEvents)) RefreshTransfer(record, operation); };
+        // Reconcile immediately and periodically too: completion may occur before
+        // subscriptions, and not every runtime revision reliably delivers events.
+        RefreshTransfer(record, operation);
     }
 }
