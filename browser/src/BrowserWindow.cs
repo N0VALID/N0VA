@@ -17,6 +17,7 @@ internal sealed class SiteTab : SmoothPanel
     public bool Suspended;
     public readonly RedirectGuard Guard = new();
     public string? BlockedNavigation;
+    public CoreWebView2DevToolsProtocolEventReceiver? NetworkEvents;
     public SiteTab() { Text = "New tab"; }
 }
 
@@ -52,6 +53,7 @@ internal sealed partial class BrowserWindow : Form
     internal Preferences Preferences => prefs;
     internal bool BlockerReady => blockerReady;
     internal bool IntegrationTest;
+    internal string LastNetworkFailure = "No loadingFailed event observed";
     internal int ActiveDownloadCount => activeDownloads.Count;
     internal string ProfileDirectory => profileDirectory;
 
@@ -217,9 +219,10 @@ internal sealed partial class BrowserWindow : Form
         blockerReady = true; t.Ready = true;
         await c.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
         var seenBlocks = new HashSet<string>();
-        c.GetDevToolsProtocolEventReceiver("Network.loadingFailed").DevToolsProtocolEventReceived += (_, e) => {
-            try { using var data = JsonDocument.Parse(e.ParameterObjectAsJson); var item = data.RootElement;
-                if (item.TryGetProperty("errorText", out var error) && error.GetString() == "net::ERR_BLOCKED_BY_CLIENT" && item.TryGetProperty("requestId", out var id) && seenBlocks.Add(id.GetString()!)) {
+        t.NetworkEvents = c.GetDevToolsProtocolEventReceiver("Network.loadingFailed");
+        t.NetworkEvents.DevToolsProtocolEventReceived += (_, e) => {
+            try { using var data = JsonDocument.Parse(e.ParameterObjectAsJson); var item = data.RootElement; if (IntegrationTest) LastNetworkFailure = e.ParameterObjectAsJson;
+                if (item.TryGetProperty("errorText", out var error) && (error.GetString()?.StartsWith("net::ERR_BLOCKED_BY_CLIENT", StringComparison.Ordinal) == true) && item.TryGetProperty("requestId", out var id) && seenBlocks.Add(id.GetString()!)) {
                     blockedRequests++; UpdateCounters(); if (seenBlocks.Count > 5000) seenBlocks.Clear();
                 }
             } catch (JsonException) { }

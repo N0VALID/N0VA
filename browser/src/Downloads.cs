@@ -39,7 +39,7 @@ internal sealed partial class BrowserWindow
         """;
     void BuildDownloads()
     {
-        var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 145, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 160, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
         head.Controls.Add(panelTitle); head.Controls.Add(panelHint);
         refreshFiles = ActionButton("Refresh links", () => _ = RefreshFiles()); head.Controls.Add(refreshFiles);
         head.Controls.Add(ActionButton("Close", () => downloads.Visible = false));

@@ -36,7 +36,7 @@ internal static class ProxySmoke
             try {
                 await window.Navigate(window.Current!, "http://route.invalid/");
                 var core = window.Current!.View!.CoreWebView2;
-                var until = DateTime.UtcNow.AddSeconds(20); while (core.DocumentTitle != "Proxy fixture" && DateTime.UtcNow < until) await Task.Delay(100);
+                var until = DateTime.UtcNow.AddSeconds(20); while ((core.DocumentTitle != "Proxy fixture" || window.Current!.Loading) && DateTime.UtcNow < until) await Task.Delay(100);
                 if (core.DocumentTitle != "Proxy fixture" || proxiedRequests == 0) throw new Exception("Browser did not use the explicit proxy");
                 proxy.Stop();
                 var completed = new TaskCompletionSource<bool>();

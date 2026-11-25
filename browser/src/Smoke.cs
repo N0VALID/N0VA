@@ -91,7 +91,7 @@ internal static class Smoke
                 await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[\"*blocked-pixel*\"]}");
                 await c.ExecuteScriptAsync("const p = new Image(); p.src = '/blocked-pixel.png'; document.body.append(p);");
                 deadline = DateTime.UtcNow.AddSeconds(10); while (window.BlockedRequests == 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
-                if (window.BlockedRequests == 0) throw new Exception("Runtime blocked-request counter did not update");
+                if (window.BlockedRequests == 0) throw new Exception("Runtime blocked-request counter did not update: " + window.LastNetworkFailure);
                 await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[]}");
                 var savedFile = Path.Combine(root, "app.zip");
                 bool pickerCalled = false;
@@ -138,7 +138,9 @@ internal static class Smoke
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png"));
                 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, redirect toggle (HTTP/script/meta), blocker toggle, runtime block counter, favorites/history, release detection, credits, animation and resize, saved settings.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
                 result = 0;
-            } catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); }
+            } catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString());
+                try { using var shot = new Bitmap(window.Width, window.Height); window.DrawToBitmap(shot, new Rectangle(0, 0, window.Width, window.Height)); shot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png")); } catch { }
+            }
             finally { window.Close(); }
         };
         Application.Run(window);
