@@ -122,7 +122,7 @@ jobs:
 
           Fixes downloads that appeared stuck at the full byte count: native browser download prompts stay visible, pending finalization is labeled clearly, interruptions show their reason, and runtime state is reconciled even if an event is missed. Browser details opens the native panel for an unfinished transfer. Reputation checks remain enabled; receiving all bytes never forces completion.
 
-          Fixes live button-painting corruption and overlapping letters/checkboxes by compositing only the background layers, without replaying native parent painting. Search and missing favorite icons use clear symbols. Windows checks include a 46 MB download, the previous N0VA installer, pause/resume/cancel, and actual screen captures with button-pixel comparisons.
+          Fixes live button-painting corruption and overlapping letters/checkboxes by repainting the background on every frame, clearing stale drawing-buffer contents. Rounded wallpaper overlays are preserved. Search and missing favorite icons use clear symbols. Windows checks include a 46 MB download, the previous N0VA installer, pause/resume/cancel, and actual screen captures with button-pixel comparisons.
 
           Includes official uBlock Origin Lite, strict tracking prevention, site-file and GitHub release discovery, favorites, local download history, saved backgrounds/themes and proxy presets. Presets require your own working VPN/proxy; no service subscription or Tor client is bundled. Connection changes apply after restart.
 

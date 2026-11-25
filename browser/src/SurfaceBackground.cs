@@ -1,7 +1,7 @@
 namespace Nova;
 
-// Paint only background layers. Replaying a native parent's paint handler can
-// copy sibling text into transparent buttons on a live Windows device context.
+// Paint only background layers, keeping wallpaper and rounded translucent
+// surfaces aligned without invoking native control painting in our buffer.
 internal static class SurfaceBackground
 {
     public static void PaintParent(Control child, Graphics graphics)

@@ -15,6 +15,10 @@ internal sealed class SoftButton : Button
     {
         FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; UseVisualStyleBackColor = false;
         SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        // ButtonBase sets Opaque: its own renderer paints the background inside
+        // OnPaint. Our renderer uses OnPaintBackground, so it must run on every
+        // WM_PAINT or the shared buffer retains text from unrelated controls.
+        SetStyle(ControlStyles.Opaque, false);
         BackColor = Color.Transparent;
         motion.Tick += (_, _) => { var target = hovered ? 1f : 0f; hover += Math.Sign(target - hover) * .16f; if (Math.Abs(target - hover) < .17f) { hover = target; motion.Stop(); } Invalidate(); };
     }
