@@ -1,4 +1,4 @@
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 [Setup]
 AppId={{4A6C8C59-D8CE-48D4-A612-4F3425D29C91}
 AppName=N0VA Browser

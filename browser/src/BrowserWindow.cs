@@ -5,7 +5,7 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace Nova;
 
-internal sealed class SiteTab : TabPage
+internal sealed class SiteTab : SmoothPanel
 {
     public WebView2? View;
     public Panel? Home;
@@ -15,34 +15,39 @@ internal sealed class SiteTab : TabPage
     public bool Ready;
     public bool Loading;
     public bool Suspended;
-    public SiteTab() : base("New tab") { }
+    public readonly RedirectGuard Guard = new();
+    public string? BlockedNavigation;
+    public SiteTab() { Text = "New tab"; }
 }
 
 internal sealed partial class BrowserWindow : Form
 {
     readonly string root;
     readonly Preferences prefs;
+    readonly Library library;
     readonly bool privateSession;
     readonly string profileDirectory;
-    readonly TabControl tabs = new() { Dock = DockStyle.Fill, DrawMode = TabDrawMode.OwnerDrawFixed, ItemSize = new Size(200, 35), SizeMode = TabSizeMode.Fixed, ShowToolTips = true };
+    readonly TabDeck tabs = new() { Dock = DockStyle.Fill };
     readonly ToolStrip toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(10, 9, 10, 9), RenderMode = ToolStripRenderMode.System };
     readonly ToolStripTextBox address = new() { AutoSize = false, AccessibleName = "Search or enter address", ToolTipText = "Search with DuckDuckGo or enter an HTTPS address (Ctrl+L)", BorderStyle = BorderStyle.FixedSingle };
     readonly ToolStripStatusLabel status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-    readonly ToolStripButton back, forward, reload, files;
+    readonly ToolStripButton back, forward, reload, files, antiRedirect, bookmark;
+    readonly string connection;
+    readonly ToolStripButton blockedLink = new("Blocked redirect…") { Visible = false };
     readonly StatusStrip statusBar = new();
     readonly Panel downloads = new() { Dock = DockStyle.Right, Width = 390, Visible = false, Padding = new Padding(16) };
     readonly FlowLayoutPanel fileList = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
     readonly System.Windows.Forms.Timer idle = new() { Interval = 30000 };
     readonly HashSet<CoreWebView2DownloadOperation> activeDownloads = [];
     Task<CoreWebView2Environment>? environment;
-    Task? blocker;
+    Task<CoreWebView2BrowserExtension>? blocker;
     Task<string>? preparedBlocker;
     bool blockerReady;
     bool closing;
     int scanGeneration;
-    Color Surface => prefs.Theme == "Paper" ? Color.FromArgb(245, 244, 239) : Color.FromArgb(29, 32, 31);
+    Color Surface => prefs.Theme == "Paper" ? Color.FromArgb(245, 244, 239) : prefs.Theme == "Midnight" ? Color.FromArgb(19, 24, 33) : Color.FromArgb(29, 32, 31);
     Color Ink => prefs.Theme == "Paper" ? Color.FromArgb(35, 42, 38) : Color.FromArgb(230, 233, 227);
-    Color Accent => prefs.Accent switch { "Clay" => Color.FromArgb(206, 143, 111), "Blue" => Color.FromArgb(130, 172, 209), _ => Color.FromArgb(163, 190, 150) };
+    Color Accent => prefs.Accent switch { "Clay" => Color.FromArgb(206, 143, 111), "Blue" => Color.FromArgb(130, 172, 209), "Lavender" => Color.FromArgb(183, 166, 211), "Ice" => Color.FromArgb(150, 210, 210), _ => Color.FromArgb(163, 190, 150) };
     internal SiteTab? Current => tabs.SelectedTab as SiteTab;
     internal Preferences Preferences => prefs;
     internal bool BlockerReady => blockerReady;
@@ -53,34 +58,38 @@ internal sealed partial class BrowserWindow : Form
     public BrowserWindow(string root, Preferences? initial = null)
     {
         this.root = root;
+        library = Library.Load(Path.Combine(root, "library.json"));
         prefs = initial ?? Preferences.Load(Path.Combine(root, "preferences.json"));
         privateSession = prefs.Private;
+        connection = ConnectionPolicy.Endpoint(prefs);
         profileDirectory = privateSession ? Path.Combine(root, "Sessions", Guid.NewGuid().ToString("N")) : Path.Combine(root, "Profile");
+        DoubleBuffered = true; ResizeRedraw = true;
         Text = "N0VA Browser";
         Width = 1280; Height = 850; MinimumSize = new Size(900, 600);
         StartPosition = FormStartPosition.CenterScreen; Font = new Font("Segoe UI", 10);
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Controls.Add(tabs); Controls.Add(downloads); Controls.Add(toolbar); Controls.Add(statusBar);
         statusBar.Items.Add(status);
-        back = Tool("‹", "Back (Alt+Left)", () => Current?.View?.GoBack());
-        forward = Tool("›", "Forward (Alt+Right)", () => Current?.View?.GoForward());
-        reload = Tool("↻", "Reload (Ctrl+R)", () => { if (Current?.Ready == true) Current.View!.Reload(); });
+        back = Tool("‹", "Back (Alt+Left)", () => History(-1));
+        forward = Tool("›", "Forward (Alt+Right)", () => History(1));
+        reload = Tool("↻", "Reload (Ctrl+R)", ReloadCurrent);
         Tool("Home", "Open a fresh start page", () => AddTab());
         toolbar.Items.Add(address);
         Tool("+", "New tab (Ctrl+T)", () => AddTab());
-        files = Tool("Downloads", "Files linked on this page and download activity (Ctrl+J)", () => ToggleDownloads());
+        files = Tool("Site files", "Download links and release files from this website", () => ToggleDownloads());
+        Tool("Downloads", "Your downloaded files (Ctrl+J)", ShowTransfers);
+        bookmark = Tool("☆", "Bookmark this page (Ctrl+D)", BookmarkCurrent);
+        Tool("Favorites", "Saved websites", OpenFavorites);
+        antiRedirect = Tool("Anti-redirect: off", "Block server redirects, automatic page navigation and new windows. Can break sign-ins and download chains.", () => SetAntiRedirect(!prefs.AntiRedirect));
+        Tool("Connection", "VPN presets, proxy address and public IP", OpenConnection);
+        blockedLink.Click += async (_, _) => { if (Current is { BlockedNavigation: { } url } tab && MessageBox.Show(this, url + "\n\nOpen this blocked destination once?", "Blocked redirect", MessageBoxButtons.OKCancel) == DialogResult.OK) await Navigate(tab, url); };
+        toolbar.Items.Add(blockedLink);
         Tool("Settings", "Personalization and privacy", OpenSettings);
         address.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await NavigateInput(); } };
-        tabs.DrawItem += DrawTab;
+        tabs.CloseRequested += CloseTab;
         tabs.SelectedIndexChanged += (_, _) => {
             if (Current is { } t) { t.LastActive = DateTime.UtcNow; if (t.Suspended) { t.View?.CoreWebView2.Resume(); t.Suspended = false; } }
             scanGeneration++; Sync(); if (downloads.Visible) _ = RefreshFiles();
-        };
-        tabs.MouseUp += (_, e) => {
-            for (int i = 0; i < tabs.TabCount; i++) {
-                var r = tabs.GetTabRect(i);
-                if (r.Contains(e.Location) && (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left && e.X > r.Right - 28)) { CloseTab((SiteTab)tabs.TabPages[i]); break; }
-            }
         };
         Resize += (_, _) => Fit();
         idle.Tick += async (_, _) => {
@@ -93,34 +102,47 @@ internal sealed partial class BrowserWindow : Form
             if (!IntegrationTest && activeDownloads.Count > 0 && MessageBox.Show(this, "Downloads are still running. Cancel them and close?", "Close N0VA Browser", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
             closing = true; idle.Stop(); foreach (var d in activeDownloads.ToArray()) d.Cancel();
         };
-        FormClosed += (_, _) => { idle.Dispose(); foreach (var t in tabs.TabPages.OfType<SiteTab>()) t.View?.Dispose(); };
+        FormClosed += (_, _) => { idle.Dispose(); wallpaper?.Dispose(); foreach (var t in tabs.TabPages.OfType<SiteTab>()) t.View?.Dispose(); };
         BuildDownloads(); ApplyTheme(); AddTab(); Fit(); idle.Start();
+        Shown += (_, _) => { if (prefs.Animations && !IntegrationTest) PlayIntro(); };
     }
     ToolStripButton Tool(string text, string tip, Action action)
     {
         var b = new ToolStripButton(text) { ToolTipText = tip, Padding = new Padding(5), AccessibleName = tip };
         b.Click += (_, _) => { try { action(); } catch (Exception e) { Notice(e.Message); } }; toolbar.Items.Add(b); return b;
     }
-    void Fit() { address.Width = Math.Max(180, ClientSize.Width - 500); }
+    void Fit() { address.Width = Math.Max(140, ClientSize.Width - 850 - (blockedLink.Visible ? 135 : 0)); }
+    internal void SetAntiRedirect(bool enabled) { prefs.AntiRedirect = enabled; prefs.Save(Path.Combine(root, "preferences.json")); Sync(); }
+    void ReloadCurrent() { if (Current?.Ready == true) { Current.Guard.Permit(Current.View!.CoreWebView2.Source); Current.View.Reload(); } }
+    async void History(int offset) {
+        var tab = Current; if (tab?.Ready != true) return;
+        try {
+            var core = tab.View!.CoreWebView2;
+            using var data = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Page.getNavigationHistory", "{}"));
+            var entries = data.RootElement.GetProperty("entries"); var index = data.RootElement.GetProperty("currentIndex").GetInt32() + offset;
+            if (index < 0 || index >= entries.GetArrayLength() || tab.IsDisposed) return;
+            var entry = entries[index]; var url = entry.GetProperty("url").GetString()!;
+            if (!Policy.WebUrl(url, prefs.AllowHttp)) return;
+            tab.Guard.Permit(url);
+            await core.CallDevToolsProtocolMethodAsync("Page.navigateToHistoryEntry", JsonSerializer.Serialize(new { entryId = entry.GetProperty("id").GetInt32() }));
+        } catch (Exception ex) { Notice(ex.Message); }
+    }
     void Notice(string text) { if (!IsDisposed) status.Text = text; }
     void Sync()
     {
         var t = Current; var c = t?.Ready == true ? t.View!.CoreWebView2 : null;
         back.Enabled = c?.CanGoBack == true; forward.Enabled = c?.CanGoForward == true; reload.Enabled = c != null;
         if (!address.Focused) address.Text = c?.Source == "about:blank" ? "" : c?.Source ?? t?.Pending ?? "";
+        files.Visible = c != null && Policy.WebUrl(c.Source, true); bookmark.Enabled = files.Visible;
+        bookmark.Text = c != null && library.Bookmarks.Any(b => b.Url == c.Source) ? "★" : "☆";
         Text = (c == null ? "N0VA Browser" : c.DocumentTitle + " — N0VA Browser");
         status.Text = (privateSession ? "Temporary session" : "Saved browsing data") + "  ·  " +
-            (blockerReady ? "uBlock Origin Lite active · Strict tracking prevention" : "Protection loads before your first website") +
+            (blockerReady ? (prefs.BlockAds ? "uBlock Origin Lite active" : "Ad blocking off") + " · Strict tracking prevention" : "Protection loads before your first website") +
             (c?.Source.StartsWith("http:") == true ? "  ·  HTTP: connection is not encrypted" : "");
-        tabs.Invalidate();
-    }
-    void DrawTab(object? sender, DrawItemEventArgs e)
-    {
-        if (e.Index >= tabs.TabCount) return;
-        var r = tabs.GetTabRect(e.Index); using var b = new SolidBrush(Surface); e.Graphics.FillRectangle(b, r);
-        if (e.Index == tabs.SelectedIndex) { using var pen = new Pen(Accent, 3); e.Graphics.DrawLine(pen, r.Left + 8, r.Bottom - 2, r.Right - 8, r.Bottom - 2); }
-        TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, Font, new Rectangle(r.X + 12, r.Y, r.Width - 42, r.Height), Ink, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(e.Graphics, "×", Font, new Rectangle(r.Right - 27, r.Y, 23, r.Height), Ink, TextFormatFlags.VerticalCenter);
+        antiRedirect.Text = "Anti-redirect: " + (prefs.AntiRedirect ? "on" : "off"); antiRedirect.Checked = prefs.AntiRedirect;
+        blockedLink.Visible = t?.BlockedNavigation != null; blockedLink.ToolTipText = t?.BlockedNavigation;
+        status.Text += connection == "" ? " · System connection" : " · Proxy route configured";
+        Fit(); tabs.Invalidate();
     }
     internal SiteTab AddTab()
     {
@@ -130,7 +152,7 @@ internal sealed partial class BrowserWindow : Form
     void CloseTab(SiteTab t) { scanGeneration++; tabs.TabPages.Remove(t); t.View?.Dispose(); t.Dispose(); if (tabs.TabCount == 0) AddTab(); Sync(); }
     async Task NavigateInput()
     {
-        try { var target = Policy.Destination(address.Text); if (target.Length > 0) await Navigate(Current ?? AddTab(), target); }
+        try { var target = Policy.Destination(address.Text, prefs.SearchEngine); if (target.Length > 0) await Navigate(Current ?? AddTab(), target); }
         catch (Exception ex) { Notice(ex.Message); }
     }
     internal async Task Navigate(SiteTab t, string target)
@@ -141,6 +163,7 @@ internal sealed partial class BrowserWindow : Form
             t.Initialization ??= Initialize(t); await t.Initialization.WaitAsync(TimeSpan.FromSeconds(60));
             if (t.IsDisposed || closing) return;
             t.Home?.Dispose(); t.Home = null; t.View!.Visible = true;
+            t.BlockedNavigation = null; t.Guard.Permit(t.Pending);
             t.View.CoreWebView2.Navigate(t.Pending); t.View.Focus(); Sync();
         } catch (Exception e) {
             if (t.IsDisposed || closing) return;
@@ -159,7 +182,7 @@ internal sealed partial class BrowserWindow : Form
         var extensionPath = await preparedBlocker;
         environment ??= CoreWebView2Environment.CreateAsync(null, profileDirectory, new CoreWebView2EnvironmentOptions {
             AreBrowserExtensionsEnabled = true, EnableTrackingPrevention = true,
-            AdditionalBrowserArguments = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+            AdditionalBrowserArguments = ConnectionPolicy.Arguments(connection)
         });
         var env = await environment; if (t.IsDisposed || closing) return;
         var view = new WebView2 { Dock = DockStyle.Fill, Visible = true, DefaultBackgroundColor = Surface }; t.View = view; t.Controls.Add(view);
@@ -176,36 +199,49 @@ internal sealed partial class BrowserWindow : Form
         c.LaunchingExternalUriScheme += (_, e) => { e.Cancel = true; Notice("External application links are blocked."); };
         c.NavigationStarting += (_, e) => {
             if (!Policy.WebUrl(e.Uri, prefs.AllowHttp)) { e.Cancel = true; Notice("Unsafe or non-HTTPS navigation blocked."); return; }
-            t.Loading = true; if (t == Current) { scanGeneration++; fileList.Controls.Clear(); } LabelTab(t);
+            if (t.Guard.Blocks(e.Uri, prefs.AntiRedirect, e.IsRedirected, e.IsUserInitiated)) {
+                e.Cancel = true; t.BlockedNavigation = e.Uri; if (t == Current) Sync(); return;
+            }
+            t.Loading = true; if (t == Current) { scanGeneration++; ClearControls(fileList); } LabelTab(t);
         };
         c.FrameNavigationStarting += (_, e) => {
             if (e.Uri != "about:blank" && e.Uri != "about:srcdoc" && !Policy.WebUrl(e.Uri, prefs.AllowHttp)) e.Cancel = true;
         };
-        c.NewWindowRequested += async (_, e) => { e.Handled = true; if (e.IsUserInitiated && Policy.WebUrl(e.Uri, prefs.AllowHttp)) await Navigate(AddTab(), e.Uri); };
+        c.NewWindowRequested += async (_, e) => { e.Handled = true; if (!prefs.AntiRedirect && e.IsUserInitiated && Policy.WebUrl(e.Uri, prefs.AllowHttp)) await Navigate(AddTab(), e.Uri); };
         c.DocumentTitleChanged += (_, _) => LabelTab(t); c.SourceChanged += (_, _) => { if (t == Current) Sync(); };
         c.HistoryChanged += (_, _) => { if (t == Current) Sync(); };
         c.NavigationCompleted += async (_, e) => { t.Loading = false; LabelTab(t); if (!e.IsSuccess) Notice("Page load failed: " + e.WebErrorStatus); if (t == Current && downloads.Visible) await RefreshFiles(); };
         c.DownloadStarting += (_, e) => DownloadStarting(e);
         c.ProcessFailed += (_, _) => Notice("A browser process stopped. Close this tab and open a new one.");
-        blocker ??= Blocker.Enable(c.Profile, extensionPath); await blocker;
+        blocker ??= Blocker.Enable(c.Profile, extensionPath, prefs.BlockAds); await blocker;
         blockerReady = true; t.Ready = true;
+        await c.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
+        var seenBlocks = new HashSet<string>();
+        c.GetDevToolsProtocolEventReceiver("Network.loadingFailed").DevToolsProtocolEventReceived += (_, e) => {
+            try { using var data = JsonDocument.Parse(e.ParameterObjectAsJson); var item = data.RootElement;
+                if (item.TryGetProperty("errorText", out var error) && error.GetString() == "net::ERR_BLOCKED_BY_CLIENT" && item.TryGetProperty("requestId", out var id) && seenBlocks.Add(id.GetString()!)) {
+                    blockedRequests++; UpdateCounters(); if (seenBlocks.Count > 5000) seenBlocks.Clear();
+                }
+            } catch (JsonException) { }
+        };
     }
     void LabelTab(SiteTab t)
     {
         if (t.IsDisposed || t.View?.CoreWebView2 == null) return;
         t.Text = (t.Loading ? "… " : "") + t.View.CoreWebView2.DocumentTitle;
-        t.ToolTipText = t.View.CoreWebView2.Source;
+
         if (t == Current) Sync(); tabs.Invalidate();
     }
     protected override bool ProcessCmdKey(ref Message msg, Keys key)
     {
-        if (key == (Keys.Alt | Keys.Left) && Current?.View?.CanGoBack == true) { Current.View.GoBack(); return true; }
-        if (key == (Keys.Alt | Keys.Right) && Current?.View?.CanGoForward == true) { Current.View.GoForward(); return true; }
+        if (key == (Keys.Alt | Keys.Left) && Current?.View?.CanGoBack == true) { History(-1); return true; }
+        if (key == (Keys.Alt | Keys.Right) && Current?.View?.CanGoForward == true) { History(1); return true; }
         if (key == (Keys.Control | Keys.L)) { address.Focus(); address.SelectAll(); return true; }
         if (key == (Keys.Control | Keys.T)) { AddTab(); return true; }
         if (key == (Keys.Control | Keys.W) && Current is { } t) { CloseTab(t); return true; }
-        if (key == (Keys.Control | Keys.J)) { ToggleDownloads(); return true; }
-        if (key == (Keys.Control | Keys.R)) { if (Current?.Ready == true) Current.View!.Reload(); return true; }
+        if (key == (Keys.Control | Keys.J)) { ShowTransfers(); return true; }
+        if (key == (Keys.Control | Keys.D)) { BookmarkCurrent(); return true; }
+        if (key == (Keys.Control | Keys.R)) { ReloadCurrent(); return true; }
         if (key == (Keys.Control | Keys.Tab) && tabs.TabCount > 0) { tabs.SelectedIndex = (tabs.SelectedIndex + 1) % tabs.TabCount; return true; }
         if (key == Keys.Escape && Current?.Ready == true) { Current.View!.CoreWebView2.Stop(); return true; }
         return base.ProcessCmdKey(ref msg, key);

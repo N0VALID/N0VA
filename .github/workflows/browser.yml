@@ -34,9 +34,16 @@ jobs:
             Start-Process 'browser/vendor/MicrosoftEdgeWebview2Setup.exe' -ArgumentList '/silent /install' -Wait
           }
           $test = Start-Process $exe -ArgumentList '--smoke-test' -PassThru
-          if (!$test.WaitForExit(150000)) { $test.Kill(); throw 'Native smoke test timed out' }
+          if (!$test.WaitForExit(180000)) { $test.Kill(); Get-Content browser/out/smoke-result.txt -ErrorAction SilentlyContinue; throw 'Native smoke test timed out' }
           Get-Content browser/out/smoke-result.txt
           if ($test.ExitCode -ne 0) { throw 'Native browser test failed' }
+      - name: Verify browser proxy routing and failure behavior
+        shell: pwsh
+        run: |
+          $test = Start-Process 'browser/out/N0VA Browser.exe' -ArgumentList '--proxy-smoke-test' -PassThru
+          if (!$test.WaitForExit(120000)) { $test.Kill(); throw 'Proxy smoke test timed out' }
+          Get-Content browser/out/proxy-result.txt
+          if ($test.ExitCode -ne 0) { throw 'Proxy routing test failed' }
       - name: Save integration evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -45,12 +52,13 @@ jobs:
           path: |
             browser/out/smoke-result.txt
             browser/out/smoke.png
+            browser/out/proxy-result.txt
           if-no-files-found: warn
       - name: Build setup wizard
         shell: pwsh
         run: |
           if (!(Test-Path browser/out/licenses/webview2/LICENSE.txt) -or !(Get-ChildItem browser/out/licenses/runtime -Recurse -Filter THIRD-PARTY-NOTICES.TXT)) { throw 'Redistribution notices missing' }
-          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png -ErrorAction SilentlyContinue
+          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt -ErrorAction SilentlyContinue
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
           if ($LASTEXITCODE) { throw 'Installer compilation failed' }
       - name: Test installation and desktop shortcut
@@ -94,13 +102,8 @@ jobs:
           cat > notes.txt <<'NOTES'
           Windows x64 preview of N0VA Browser. Download the Setup.exe and run the wizard; it creates a desktop shortcut. The Microsoft WebView2 runtime is installed if needed.
 
-          Includes official uBlock Origin Lite, strict tracking prevention, page-download discovery, saved personalization, temporary browsing data by default, and idle-tab suspension. Direct file links may open a browser preview (for example PDFs); dynamically generated links are discovered only once the website exposes them.
+          Adds an anti-redirect toggle, VPN/proxy presets and custom server settings, separate Site files and download history, GitHub release-asset discovery (including RustDesk), blocker on/off, favorites, observed blocked-request counts, a cleaner native tab strip, startup animation, more appearance settings, and clickable credits. Presets require your own running VPN/proxy service; no VPN subscription or Tor client is bundled. Connection changes apply after restart. Block counts are observed network events, not separate audited totals for ads and trackers.
 
           This is an unsigned, unaudited preview. It is not Brave/LibreWolf-equivalent hardening. Microsoft runtime updates are automatic; N0VA and bundled filters need a new app release. See browser/README.md and browser/SECURITY.md for limits and build instructions. SHA256SUMS.txt accompanies the installer.
           NOTES
-          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.1.0 preview" --prerelease --notes-file notes.txt
-          # Retire the initial preview from this implementation session, which
-          # predates bundling the runtime license files. Replacement is already live.
-          if gh release view browser-preview-314016a3 >/dev/null 2>&1; then
-            gh release delete browser-preview-314016a3 --yes --cleanup-tag
-          fi
+          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.2.0 preview" --prerelease --notes-file notes.txt

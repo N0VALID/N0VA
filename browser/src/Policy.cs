@@ -9,7 +9,7 @@ internal static partial class Policy
         Uri.TryCreate(text, UriKind.Absolute, out var u) && u.UserInfo.Length == 0 &&
         (u.Scheme == "https" || allowHttp && u.Scheme == "http");
 
-    public static string Destination(string text)
+    public static string Destination(string text, string engine = "DuckDuckGo")
     {
         text = text.Trim();
         if (text.Length == 0) return "";
@@ -19,7 +19,7 @@ internal static partial class Policy
             throw new ArgumentException("Only HTTPS website addresses are supported (HTTP is optional in Settings).");
         if (!text.Any(char.IsWhiteSpace) && WebUrl("https://" + text) &&
             (new Uri("https://" + text).Host.Contains('.') || text == "localhost")) return "https://" + text;
-        return "https://duckduckgo.com/?q=" + Uri.EscapeDataString(text);
+        return (engine == "Brave Search" ? "https://search.brave.com/search?q=" : "https://duckduckgo.com/?q=") + Uri.EscapeDataString(text);
     }
 
     public static string SafeFileName(string value)
@@ -36,11 +36,11 @@ internal static partial class Policy
 
     public static List<PageFile> ParseLinks(string json, bool allowHttp) =>
         (JsonSerializer.Deserialize<List<PageFile>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [])
-        .Where(x => x.Url.Length <= 8192 && WebUrl(x.Url, allowHttp))
+        .Where(x => x != null && x.Url != null && x.Name != null && x.Url.Length <= 8192 && WebUrl(x.Url, allowHttp))
         .DistinctBy(x => x.Url).Take(100).Select(x => x with { Name = SafeFileName(x.Name) }).ToList();
 }
 
-internal record PageFile(string Name, string Url);
+internal record PageFile(string Name, string Url, string Kind = "File");
 
 internal sealed record Preferences
 {
@@ -48,6 +48,16 @@ internal sealed record Preferences
     public string Accent { get; set; } = "Sage";
     public bool Private { get; set; } = true;
     public bool AllowHttp { get; set; }
+    public bool BlockAds { get; set; } = true;
+    public bool Animations { get; set; } = true;
+    public bool ShowFavorites { get; set; } = true;
+    public bool ShowClock { get; set; }
+    public string BackgroundFit { get; set; } = "Fill";
+    public string SearchEngine { get; set; } = "DuckDuckGo";
+    public bool AntiRedirect { get; set; }
+    public bool ProxyEnabled { get; set; }
+    public int ProxyPreset { get; set; }
+    public string ProxyAddress { get; set; } = "";
     public bool Background { get; set; }
     public int SleepMinutes { get; set; } = 5;
     public static Preferences Load(string file)

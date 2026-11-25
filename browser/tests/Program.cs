@@ -23,3 +23,33 @@ try {
     File.WriteAllText(file, "broken{"); Check(Preferences.Load(file).Private, "Corruption falls back safely");
 } finally { Directory.Delete(root, true); }
 Console.WriteLine($"{count} security and persistence checks passed.");
+var guard = new RedirectGuard(); guard.Permit("https://example.com/");
+Check(!guard.Blocks("https://example.com/", true, false, false), "Explicit browser navigation allowed");
+Check(guard.Blocks("https://example.com/next", true, true, true), "Server redirect blocked even after gesture");
+Check(guard.Blocks("https://example.com/next", true, false, false), "Script navigation blocked");
+Check(!guard.Blocks("https://example.com/next", true, false, true), "Clicked link allowed");
+Check(!guard.Blocks("https://example.com/next", false, true, false), "Redirect toggle off");
+foreach (var bad in new[] { "http://a:80 --no-sandbox", "http://a:80;direct://", "socks5://user:pass@host:1080", "http://host:0", "http://host:65536", "http://host:80/path", "file://host:22" }) {
+    try { ConnectionPolicy.Validate(bad); throw new Exception("Accepted unsafe proxy " + bad); } catch (ArgumentException) { count++; }
+}
+Check(ConnectionPolicy.Validate("socks5://[::1]:9050") == "socks5://[::1]:9050", "IPv6 endpoint");
+Check(ConnectionPolicy.Endpoint(new Preferences { ProxyEnabled = true }) == "socks5://10.64.0.1:1080", "Mullvad preset");
+Check(ConnectionPolicy.Arguments("http://127.0.0.1:8080").Contains("--proxy-bypass-list=<-loopback>"), "No implicit loopback bypass");
+Console.WriteLine($"{count} total policy checks passed.");
+Check(ReleaseDiscovery.Target("https://github.com/rustdesk/rustdesk/releases/latest")?.Api == "https://api.github.com/repos/rustdesk/rustdesk/releases/latest", "RustDesk release route");
+Check(ReleaseDiscovery.Target("https://evil.example/rustdesk/rustdesk/releases/latest") == null, "Release endpoint cannot redirect to arbitrary API");
+Check(ReleaseDiscovery.Target("https://github.com/rustdesk/rustdesk/releases/download/v1/app.exe") == null, "Asset URL is not a release endpoint");
+var assets = ReleaseDiscovery.Parse("""{"assets":[{"name":"app.exe","browser_download_url":"https://github.com/test/repo/releases/download/v1/app.exe"},{"name":"bad","browser_download_url":"https://elsewhere.example/file.exe"}]}""", "test/repo");
+Check(assets.Count == 1 && assets[0].Name == "app.exe", "Release assets are validated");
+var libraryRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+try {
+    var file = Path.Combine(libraryRoot, "library.json"); var library = new Library();
+    library.Bookmarks.Add(new("Example", "https://example.com/")); library.Transfers.Add(new() { Name = "app.zip", State = "InProgress" }); library.Save(file);
+    var saved = Library.Load(file); Check(saved.Bookmarks.Count == 1 && saved.Transfers[0].State == "Interrupted", "Library persistence and interrupted transfer recovery");
+} finally { Directory.Delete(libraryRoot, true); }
+Console.WriteLine($"{count} total checks passed.");
+if (args.Contains("--check-rustdesk")) {
+    var live = await ReleaseDiscovery.Fetch("https://github.com/rustdesk/rustdesk/releases/latest", "");
+    Check(live.Any(x => x.Name.EndsWith(".exe")) && live.Any(x => x.Name.EndsWith(".msi")), "Live RustDesk Windows assets");
+    Console.WriteLine($"Live RustDesk check: {live.Count} release assets, Windows EXE and MSI found.");
+}

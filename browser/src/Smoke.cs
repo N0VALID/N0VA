@@ -32,6 +32,14 @@ internal static class Smoke
                     var request = await reader.ReadLineAsync(timeout.Token);
                     while (await reader.ReadLineAsync(timeout.Token) is { Length: > 0 }) { }
                     var html = "<title>N0VA fixture</title><a href='/app.zip'>app</a><a href='/app.zip'>duplicate</a><a download='manual.pdf' href='/get?id=2'>manual</a><a download href='javascript:alert(1)'>bad</a>";
+                    var path = request?.Split(' ')[1] ?? "/";
+                    if (path == "/redirect") {
+                        await stream.WriteAsync(Encoding.UTF8.GetBytes("HTTP/1.1 302 Found\r\nLocation: " + origin + "/arrived\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), timeout.Token); return;
+                    }
+                    if (path == "/arrived") html = "<title>Arrived</title>";
+                    if (path == "/script") html = "<title>Script</title><script>setTimeout(()=>location.href='/arrived',100)</script>";
+                    if (path == "/meta") html = "<title>Meta</title><meta http-equiv='refresh' content='0;url=/arrived'>";
+                    if (path == "/release") html = "<title>Release fixture</title><a href='https://github.com/rustdesk/rustdesk/releases/latest'>Download RustDesk</a>";
                     var attachment = request?.StartsWith("GET /app.zip ") == true;
                     if (attachment) html = "N0VA download fixture";
                     var contentType = attachment ? "application/octet-stream\r\nContent-Disposition: attachment; filename=app.zip" : "text/html";
@@ -48,6 +56,7 @@ internal static class Smoke
         window.Shown += async (_, _) => {
             try {
                 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "Initializing WebView2 and blocker");
+                if (window.SiteFilesButtonVisible) throw new Exception("Site files must be hidden on home");
                 var t = window.Current!;
                 await window.Navigate(t, origin);
                 if (!t.Ready) throw new Exception("WebView2 initialization failed");
@@ -59,6 +68,31 @@ internal static class Smoke
                 if (c.Profile.PreferredTrackingPreventionLevel != CoreWebView2TrackingPreventionLevel.Strict || c.Settings.IsWebMessageEnabled || c.Settings.AreHostObjectsAllowed || !c.Settings.IsReputationCheckingRequired) throw new Exception("Privacy settings missing");
                 var links = await window.ScanFiles(t);
                 if (links.Count != 2 || !links.Any(x => x.Name == "manual.pdf")) throw new Exception("Download discovery failed: " + links.Count);
+                window.BookmarkCurrent();
+                if (Library.Load(Path.Combine(root, "library.json")).Bookmarks.Count != 1) throw new Exception("Favorite did not persist");
+                await window.SetBlocking(false);
+                if ((await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled && x.Name.Contains("uBlock"))) throw new Exception("Blocker toggle did not disable");
+                await window.SetBlocking(true);
+                if (!(await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled && x.Name.Contains("uBlock"))) throw new Exception("Blocker toggle did not enable");
+                window.SetAntiRedirect(true);
+                foreach (var path in new[] { "/redirect", "/script", "/meta" }) {
+                    await window.Navigate(t, origin + path);
+                    deadline = DateTime.UtcNow.AddSeconds(10);
+                    while (t.BlockedNavigation == null && DateTime.UtcNow < deadline) await Task.Delay(100);
+                    if (t.BlockedNavigation != origin + "/arrived" || c.DocumentTitle == "Arrived") throw new Exception("Anti-redirect failed for " + path);
+                }
+                window.SetAntiRedirect(false); await window.Navigate(t, origin + "/redirect");
+                deadline = DateTime.UtcNow.AddSeconds(10);
+                while (c.DocumentTitle != "Arrived" && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (c.DocumentTitle != "Arrived") throw new Exception("Redirect toggle off failed");
+                await window.Navigate(t, origin + "/release");
+                deadline = DateTime.UtcNow.AddSeconds(10); while (c.DocumentTitle != "Release fixture" && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (!(await window.ScanFiles(t)).Any(x => x.Kind == "Release" && x.Url.Contains("rustdesk/rustdesk"))) throw new Exception("RustDesk release-link pattern not detected");
+                await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[\"*blocked-pixel*\"]}");
+                await c.ExecuteScriptAsync("const p = new Image(); p.src = '/blocked-pixel.png'; document.body.append(p);");
+                deadline = DateTime.UtcNow.AddSeconds(10); while (window.BlockedRequests == 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (window.BlockedRequests == 0) throw new Exception("Runtime blocked-request counter did not update");
+                await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[]}");
                 var savedFile = Path.Combine(root, "app.zip");
                 bool pickerCalled = false;
                 window.TestDownloadPicker = (name, source) => { pickerCalled = name == "app.zip" && source == "127.0.0.1"; return savedFile; };
@@ -88,11 +122,21 @@ internal static class Smoke
                 if (c.Source != before) throw new Exception("Runtime HTTP navigation accepted");
                 window.Preferences.Theme = "Paper"; window.Preferences.Save(Path.Combine(root, "preferences.json"));
                 if (Preferences.Load(Path.Combine(root, "preferences.json")).Theme != "Paper") throw new Exception("Settings did not persist");
+                if (!Library.Load(Path.Combine(root, "library.json")).Transfers.Any(d => d.Name == "app.zip" && d.State == "Completed")) throw new Exception("Download history did not persist");
                 window.Preferences.Theme = "Graphite";
+                window.OpenCredits();
+                var linksInCredits = window.Current!.Controls.OfType<FlowLayoutPanel>().SelectMany(p => p.Controls.OfType<LinkLabel>()).Select(l => l.Text).ToArray();
+                if (!linksInCredits.Contains("https://github.com/N0VALID/N0VA/") || !linksInCredits.Contains("https://guns.lol/n0valid")) throw new Exception("Credit links missing");
                 window.AddTab();
+                if (window.SiteFilesButtonVisible) throw new Exception("Site files visible on new tab");
+                window.WindowState = FormWindowState.Maximized; await Task.Delay(150);
+                window.WindowState = FormWindowState.Normal; window.Size = new Size(1100, 760); await Task.Delay(150);
+                window.Size = new Size(1280, 850); await Task.Delay(150);
+                window.PlayIntro(); await Task.Delay(1400);
+                if (window.Controls.OfType<IntroSurface>().Any()) throw new Exception("Intro did not stop");
                 using var screenshot = new Bitmap(window.Width, window.Height); window.DrawToBitmap(screenshot, window.Bounds with { X = 0, Y = 0 });
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png"));
-                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, saved settings.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, redirect toggle (HTTP/script/meta), blocker toggle, runtime block counter, favorites/history, release detection, credits, animation and resize, saved settings.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
                 result = 0;
             } catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); }
             finally { window.Close(); }

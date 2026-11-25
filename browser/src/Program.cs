@@ -7,9 +7,9 @@ internal static class Program
     {
         if (args.Contains("--check-runtime")) { try { Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString(); return 0; } catch { return 2; } }
         ApplicationConfiguration.Initialize();
-        if (args.Contains("--smoke-test")) {
+        if (args.Contains("--smoke-test") || args.Contains("--proxy-smoke-test")) {
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-            try { return Smoke.Run(); }
+            try { return args.Contains("--proxy-smoke-test") ? ProxySmoke.Run() : Smoke.Run(); }
             catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString()); return 1; }
         }
         using var mutex = new Mutex(true, @"Local\N0VALID.NovaBrowser", out var first);

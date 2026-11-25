@@ -4,7 +4,7 @@ A Windows tool hub made by N0VALID. Version 2.2 opens with green Matrix rain and
 
 ## N0VA Browser for Windows
 
-The standalone [N0VA Browser](browser/README.md) adds native tabs, official uBlock Origin Lite, strict tracking prevention, a top-bar page-download panel, saved backgrounds/themes and idle-tab suspension. Its `.exe` setup wizard creates a desktop shortcut and installs WebView2 if needed. Get the tested installer from [N0VA releases](https://github.com/N0VALID/N0VA/releases). This is an unsigned, unaudited preview; see its [security limits](browser/SECURITY.md). The existing hub and Seemless browser are unchanged.
+The standalone [N0VA Browser](browser/README.md) adds native tabs, official uBlock Origin Lite, strict tracking prevention, a top-bar page-download panel, saved backgrounds/themes and idle-tab suspension. Version 0.2 adds anti-redirect, VPN/proxy presets and custom endpoints, favorites, separate download history, release-file discovery, credits, and a refreshed native interface. Its `.exe` setup wizard creates a desktop shortcut and installs WebView2 if needed. Get the tested installer from [N0VA releases](https://github.com/N0VALID/N0VA/releases). This is an unsigned, unaudited preview; see its [security limits](browser/SECURITY.md). The existing hub and Seemless browser are unchanged.
 
 ## Page 1 - Tools and setup
 

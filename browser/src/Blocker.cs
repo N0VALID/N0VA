@@ -21,12 +21,26 @@ internal static class Blocker
         ZipFile.ExtractToDirectory(zip, directory);
         return directory;
     });
-    public static async Task Enable(CoreWebView2Profile profile, string directory)
+    public static async Task<CoreWebView2BrowserExtension> Enable(CoreWebView2Profile profile, string directory, bool enabled)
     {
         // Adding from the same stable folder reinstalls our extension. Do not
         // remove WebView2's internal extensions (for example its PDF viewer).
         var extension = await profile.AddBrowserExtensionAsync(directory);
-        if (!extension.IsEnabled) await extension.EnableAsync(true);
-        if (!extension.IsEnabled) throw new InvalidOperationException("uBlock Origin Lite did not enable.");
+        if (extension.IsEnabled != enabled) await extension.EnableAsync(enabled);
+        if (extension.IsEnabled != enabled) throw new InvalidOperationException("uBlock Origin Lite did not change state.");
+        return extension;
+    }
+}
+
+internal sealed partial class BrowserWindow
+{
+    internal async Task SetBlocking(bool enabled)
+    {
+        var old = prefs.BlockAds;
+        CoreWebView2BrowserExtension? extension = blocker == null ? null : await blocker;
+        try {
+            if (extension != null) await extension.EnableAsync(enabled);
+            var next = prefs with { BlockAds = enabled }; next.Save(Path.Combine(root, "preferences.json")); prefs.BlockAds = enabled; Sync();
+        } catch { if (extension != null) await extension.EnableAsync(old); throw; }
     }
 }
