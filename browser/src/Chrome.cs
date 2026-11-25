@@ -27,9 +27,7 @@ internal sealed class SoftButton : Button
         var size = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         return new Size(Math.Max(MinimumSize.Width, size.Width + 28 + (Image == null ? 0 : 24)), Math.Max(MinimumSize.Height, size.Height + 14));
     }
-    // Let WinForms composite a transparent child. Manually invoking a parent's
-    // paint handler with a translated Graphics corrupts live native/GDI painting.
-    protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
+    protected override void OnPaintBackground(PaintEventArgs e) => SurfaceBackground.PaintParent(this, e.Graphics);
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -72,11 +70,12 @@ internal sealed class SoftSurface : SmoothPanel
         path.AddArc(r.Left, r.Top, d, d, 180, 90); path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
         path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90); path.CloseFigure(); return path;
     }
-    protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
-    protected override void OnPaint(PaintEventArgs e)
+    protected override void OnPaintBackground(PaintEventArgs e) => SurfaceBackground.PaintParent(this, e.Graphics);
+    protected override void OnPaint(PaintEventArgs e) => PaintFill(e.Graphics);
+    internal void PaintFill(Graphics graphics)
     {
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = Shape(new Rectangle(0, 0, Width - 1, Height - 1), Radius); using var brush = new SolidBrush(FillColor); e.Graphics.FillPath(brush, path);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var path = Shape(new Rectangle(0, 0, Width - 1, Height - 1), Radius); using var brush = new SolidBrush(FillColor); graphics.FillPath(brush, path);
     }
 }
 internal sealed partial class BrowserWindow

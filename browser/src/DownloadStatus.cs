@@ -1,6 +1,16 @@
 namespace Nova;
 internal static class DownloadStatus
 {
+    public static string State(string runtimeState, string reason, bool canResume, bool requestedPause, string previousReason)
+    {
+        if (runtimeState == "Completed") return "Completed";
+        if (runtimeState == "Interrupted") {
+            if (reason == "UserPaused" || reason == "UserCanceled" && canResume) return "Paused";
+            return reason == "UserCanceled" ? "Canceled" : "Interrupted";
+        }
+        // A native-panel Resume also clears an app-requested pause.
+        return requestedPause && previousReason is not ("UserPaused" or "UserCanceled") ? "Paused" : runtimeState;
+    }
     public static string Describe(Transfer item, DateTime now)
     {
         if (item.State == "Completed") return "Completed · saved";

@@ -34,7 +34,7 @@ internal static class ReleaseDiscovery
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         if (connection.Length > 0) handler.Proxy = new WebProxy(ConnectionPolicy.Validate(connection));
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 2 * 1024 * 1024 };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("N0VA-Browser/0.4.1");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("N0VA-Browser/0.4.2");
         return Parse(await client.GetStringAsync(target.Api), target.Repository);
     }
 }

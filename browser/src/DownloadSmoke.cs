@@ -75,6 +75,11 @@ internal static class DownloadSmoke
                 var pause = Descendants(window.DownloadPanel).OfType<Button>().First(b => b.Text == "Pause" && b.Visible); pause.PerformClick();
                 await Until(() => slow.State == "Paused", "Pause state did not update");
                 pause.PerformClick(); await Until(() => slow.State == "InProgress", "Resume did not update");
+                // Exercise changes originating outside our own transfer controls,
+                // as when the user pauses/resumes in the native download panel.
+                var slowOperation = window.DownloadOperation(slow);
+                slowOperation.Pause(); await Until(() => slow.State == "Paused", "External pause did not update");
+                slowOperation.Resume(); await Until(() => slow.State == "InProgress", "External resume did not update");
                 Descendants(window.DownloadPanel).OfType<Button>().First(b => b.Text == "Cancel" && b.Visible).PerformClick();
                 await Until(() => slow.State == "Canceled" && window.ActiveDownloadCount == 0, "Canceled download remained active");
                 File.AppendAllText(report, "\nPASS: pause/resume/cancel and active-tab ownership.");

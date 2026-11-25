@@ -8,13 +8,14 @@ internal sealed class HomeSurface : SmoothPanel
 {
     public Image? Wallpaper;
     public bool FillImage;
-    protected override void OnPaintBackground(PaintEventArgs e)
+    protected override void OnPaintBackground(PaintEventArgs e) => PaintWallpaper(e.Graphics);
+    internal void PaintWallpaper(Graphics graphics)
     {
-        e.Graphics.Clear(BackColor);
+        using var brush = new SolidBrush(BackColor); graphics.FillRectangle(brush, ClientRectangle);
         if (Wallpaper == null || Width == 0 || Height == 0) return;
         var scale = FillImage ? Math.Max((float)Width / Wallpaper.Width, (float)Height / Wallpaper.Height) : Math.Min((float)Width / Wallpaper.Width, (float)Height / Wallpaper.Height);
         var w = Wallpaper.Width * scale; var h = Wallpaper.Height * scale;
-        e.Graphics.DrawImage(Wallpaper, (Width - w) / 2, (Height - h) / 2, w, h);
+        graphics.DrawImage(Wallpaper, (Width - w) / 2, (Height - h) / 2, w, h);
     }
 }
 internal sealed class IntroSurface : SmoothPanel
@@ -171,7 +172,7 @@ internal sealed partial class BrowserWindow
                 wrap.Controls.Add(Caption("Why is this such a good browser?", 18));
                 wrap.Controls.Add(Caption("The aim is simple: useful controls without clutter. Ad and tracker blocking is on by default, temporary browsing data is the default, and there is no N0VA analytics service. The native interface shares the installed WebView2 runtime and sleeps idle tabs."));
                 wrap.Controls.Add(Caption("Those are design choices, not a claim of perfect privacy or best-in-class performance. Microsoft runtime services can contact Microsoft. This is an unsigned, unaudited preview, and public IP privacy needs a working VPN or proxy."));
-                wrap.Controls.Add(Caption("N0VA Browser 0.4.1 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
+                wrap.Controls.Add(Caption("N0VA Browser 0.4.2 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
                 wrap.Controls.Add(ActionButton("Credits", () => { dialog.Close(); OpenCredits(); }));
                 Toggle("Check for app updates when N0VA opens", draft.CheckUpdates, v => draft.CheckUpdates = v);
                 wrap.Controls.Add(Caption("Checks GitHub through your current connection. You can choose No when an update is offered; installers never run automatically.", 10));

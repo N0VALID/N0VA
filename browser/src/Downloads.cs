@@ -17,6 +17,7 @@ internal sealed partial class BrowserWindow
     internal IReadOnlyList<Transfer> DownloadRecords => library.Transfers;
     internal void ReconcileDownloads() { foreach (var (record, operation) in transferOperations.ToArray()) RefreshTransfer(record, operation); }
     internal void DownloadDetails(Transfer record) => OpenDownloadDetails(record);
+    internal CoreWebView2DownloadOperation DownloadOperation(Transfer record) => transferOperations[record];
     readonly Label panelTitle = new() { AutoSize = true, Font = new Font("Segoe UI", 20), Margin = new Padding(0, 8, 0, 8) };
     readonly Label panelHint = new() { Width = 345, Height = 44 };
     bool siteFilesMode = true;
@@ -147,8 +148,8 @@ internal sealed partial class BrowserWindow
         try {
             var state = operation.State;
             var reason = state == CoreWebView2DownloadState.Interrupted ? operation.InterruptReason.ToString() : "";
-            if (state == CoreWebView2DownloadState.Completed || state == CoreWebView2DownloadState.Interrupted && reason != "UserPaused") pausedDownloads.Remove(operation);
-            record.State = state == CoreWebView2DownloadState.Completed ? "Completed" : reason == "UserCanceled" ? "Canceled" : pausedDownloads.Contains(operation) ? "Paused" : state.ToString();
+            record.State = DownloadStatus.State(state.ToString(), reason, operation.CanResume, pausedDownloads.Contains(operation), oldReason);
+            if (record.State == "Paused") pausedDownloads.Add(operation); else pausedDownloads.Remove(operation);
             record.InterruptReason = reason;
             var received = operation.BytesReceived;
             if (record.BytesReceived != received) record.LastProgress = DateTime.UtcNow;

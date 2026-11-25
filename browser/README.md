@@ -4,7 +4,7 @@ A native Windows x64 browser preview with a quiet, configurable interface. Built
 
 ## Install
 
-Open [N0VA releases](https://github.com/N0VALID/N0VA/releases), find **N0VA Browser 0.4.1 preview**, and download `N0VA-Browser-Setup-0.4.1-x64.exe`. Run the setup wizard. The default desktop shortcut opens the installed `N0VA Browser.exe`; Start-menu and uninstall entries are also created. You can choose the install location and desktop shortcut in the wizard.
+Open [N0VA releases](https://github.com/N0VALID/N0VA/releases), find **N0VA Browser 0.4.2 preview**, and download `N0VA-Browser-Setup-0.4.2-x64.exe`. Run the setup wizard. The default desktop shortcut opens the installed `N0VA Browser.exe`; Start-menu and uninstall entries are also created. You can choose the install location and desktop shortcut in the wizard.
 
 Supports supported Windows 11 x64 installations (including compatible x64 emulation). .NET 10 is bundled. If WebView2 is missing, setup invokes Microsoft's signed bootstrapper; that step needs an internet connection. No Python or PowerShell launch wrapper is needed. The app and installer are currently unsigned; SHA256SUMS.txt is supplied alongside the matching release. Do not disable Windows security features to bypass a warning.
 
@@ -72,8 +72,8 @@ To update the blocker, review a new official uBOL release, change the version an
 Download endpoint reference: [Epic Games download page](https://store.epicgames.com/en-US/download) (Windows installer configuration), verified against the public redirect endpoint. Proxy requirements: [Mullvad SOCKS5 guide](https://mullvad.net/en/help/socks5-proxy).
 
 
-### 0.4.1 fixes
+### 0.4.2 fixes
 
 Keeps WebView2's native download UI available (including security/reputation prompts), reconciles runtime state independently of events, and explains finalization and interruption states. Download tests include a 46 MB ZIP with its callbacks deliberately suppressed and the exact 0.4.0 installer from GitHub. Receiving all bytes alone never marks a file complete, and download checks are not disabled.
 
-Rounded controls now use WinForms' supported transparent-background painting instead of manually repainting their parents, which caused live text/checkbox fragments to appear over buttons. Search and missing-favicon controls use drawn icons rather than unexplained initials. Windows CI captures the actual screen after repainting as well as control bitmaps.
+Rounded controls composite background layers without replaying native parent painting, which could copy text/checkbox fragments into buttons. Search and missing-favicon controls use drawn icons rather than unexplained initials. Windows CI compares live button pixels with offscreen rendering and captures the actual screen, including the wallpaper footer. Native-panel pause/resume changes are also reflected in N0VA's download history.
