@@ -33,11 +33,15 @@ internal sealed class IntroSurface : SmoothPanel
     {
         base.OnPaint(e);
         var progress = Math.Min(1, elapsed.Elapsed.TotalSeconds / 1.2);
-        var bounce = (1 - Math.Cos(progress * Math.PI * 4)) / 2;
-        using var font = new Font("Segoe UI", 76, FontStyle.Bold);
-        var size = TextRenderer.MeasureText("N", font);
-        var x = (int)(24 + bounce * Math.Max(0, Width - size.Width - 48));
-        TextRenderer.DrawText(e.Graphics, "N", font, new Point(x, Math.Max(0, (Height - size.Height) / 2)), ink, TextFormatFlags.NoPadding);
+        var ease = 1 - Math.Pow(1 - Math.Min(1, progress * 1.5), 3);
+        var fade = Math.Min(1, progress * 4) * Math.Min(1, (1 - progress) * 5);
+        var color = Color.FromArgb((int)(BackColor.R + (ink.R - BackColor.R) * fade), (int)(BackColor.G + (ink.G - BackColor.G) * fade), (int)(BackColor.B + (ink.B - BackColor.B) * fade));
+        using var font = new Font("Segoe UI", 54, FontStyle.Regular);
+        var box = new Rectangle(0, (int)(Height / 2 - 65 + 18 * (1 - ease)), Width, 110);
+        TextRenderer.DrawText(e.Graphics, "N 0 V A", font, box, color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 2) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        var half = (int)(48 * ease); e.Graphics.DrawLine(pen, Width / 2 - half, Height / 2 + 64, Width / 2 + half, Height / 2 + 64);
     }
 }
 
@@ -49,19 +53,21 @@ internal sealed partial class BrowserWindow
     internal long BlockedRequests => blockedRequests;
     static Button ActionButton(string text, Action action)
     {
-        var b = new Button { Text = text, AutoSize = true, MinimumSize = new Size(100, 34), FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 8, 12, 8), Cursor = Cursors.Hand, UseMnemonic = false };
+        var b = new SoftButton { Text = text, AutoSize = true, MinimumSize = new Size(100, 34), FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 8, 12, 8), Cursor = Cursors.Hand, UseMnemonic = false };
         b.FlatAppearance.BorderColor = Color.FromArgb(100, 115, 103); b.Click += (_, _) => action(); return b;
     }
     static Label Caption(string text, float size = 10) => new() { Text = text, AutoSize = true, MaximumSize = new Size(570, 0), Font = new Font("Segoe UI", size), Margin = new Padding(0, 8, 0, 8), UseMnemonic = false };
     void ApplyTheme()
     {
         SuspendLayout(); BackColor = Surface; ForeColor = Ink; toolbar.BackColor = Surface; toolbar.ForeColor = Ink;
+        chrome.BackColor = toolsBar.BackColor = addressHost.BackColor = bookmark.BackColor = Surface;
+        chrome.ForeColor = toolsBar.ForeColor = addressHost.ForeColor = bookmark.ForeColor = Ink;
         statusBar.BackColor = Surface; statusBar.ForeColor = Ink; downloads.BackColor = Surface; downloads.ForeColor = Ink;
         address.BackColor = Surface; address.ForeColor = Ink; tabs.Theme(Surface, Ink, Accent);
         foreach (var tab in tabs.TabPages) tab.BackColor = Surface;
         RefreshHomePages(); ResumeLayout(true);
     }
-    void RefreshHomePages() { foreach (var tab in tabs.TabPages.ToArray()) if (tab.Home != null) ShowHome(tab); }
+    void RefreshHomePages() { ShowHome(homePage); foreach (var tab in tabs.TabPages.ToArray()) if (tab.Home != null) ShowHome(tab); }
     internal void PlayIntro() { var intro = new IntroSurface(Surface, Accent); Controls.Add(intro); intro.BringToFront(); intro.Focus(); }
     void UpdateCounters()
     {
@@ -74,9 +80,11 @@ internal sealed partial class BrowserWindow
         if (prefs.Background && wallpaper == null) try { using var image = Image.FromFile(Path.Combine(root, "background.jpg")); wallpaper = new Bitmap(image); } catch (Exception ex) when (ex is IOException or ArgumentException or OutOfMemoryException) { }
         var home = new HomeSurface { Dock = DockStyle.Fill, BackColor = Surface, ForeColor = Ink, Wallpaper = prefs.Background ? wallpaper : null, FillImage = prefs.BackgroundFit == "Fill" };
         var center = new FlowLayoutPanel { Width = 620, Height = 275, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24), BackColor = Surface, ForeColor = Ink };
-        center.Controls.Add(Caption("N 0 V A", 44));
-        var search = new TextBox { Width = 560, Font = new Font("Segoe UI", 14), PlaceholderText = "Search or enter an address", BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, AccessibleName = "Search or enter address", Margin = new Padding(0, 16, 0, 8) };
-        search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; address.Text = search.Text; await NavigateInput(); } }; center.Controls.Add(search);
+        var wordmark = new Label { Text = "N 0 V A", Width = 560, Height = 100, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 44), ForeColor = Accent };
+        center.Controls.Add(wordmark);
+        var searchBox = new SoftSurface { Width = 560, Height = 50, Padding = new Padding(20, 12, 20, 12), Margin = new Padding(0, 12, 0, 8) };
+        var search = new TextBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 13), PlaceholderText = "Search or enter an address", BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None, AccessibleName = "Search or enter address" };
+        search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; address.Text = search.Text; await NavigateInput(); } }; searchBox.Controls.Add(search); center.Controls.Add(searchBox);
         if (prefs.ShowFavorites) {
             var favorites = new FlowLayoutPanel { Width = 560, Height = 90, WrapContents = true };
             foreach (var favorite in library.Bookmarks.Take(6)) {
@@ -84,14 +92,15 @@ internal sealed partial class BrowserWindow
             }
             center.Controls.Add(favorites);
         }
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 105, BackColor = Surface, ForeColor = Ink, Padding = new Padding(18, 8, 18, 8) };
-        var credits = ActionButton("Credits", OpenCredits); credits.Dock = DockStyle.Left;
-        var personalize = ActionButton("Personalize", () => OpenSettings("Appearance")); personalize.Dock = DockStyle.Right;
-        var count = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10), UseMnemonic = false }; counters.Add(count);
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = Surface, ForeColor = Ink, Padding = new Padding(132, 8, 132, 8) };
+        var credits = ActionButton("Credits", OpenCredits); credits.AutoSize = false; credits.SetBounds(18, 24, 100, 32);
+        var personalize = ActionButton("Personalize", () => OpenSettings("Appearance")); personalize.AutoSize = false; personalize.SetBounds(0, 24, 100, 32);
+        footer.Resize += (_, _) => personalize.Left = footer.Width - 118;
+        var count = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9), UseMnemonic = false }; counters.Add(count);
         footer.Controls.Add(count); footer.Controls.Add(credits); footer.Controls.Add(personalize); UpdateCounters();
         home.Controls.Add(center); home.Controls.Add(footer);
         if (prefs.ShowClock) home.Controls.Add(new Label { Dock = DockStyle.Top, Height = 48, Text = DateTime.Now.ToString("ddd, MMM d  ·  HH:mm"), TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(12), BackColor = Surface, ForeColor = Ink });
-        void Place() { center.Width = Math.Min(620, Math.Max(260, home.Width - 32)); search.Width = center.Width - 48; center.Left = Math.Max(16, (home.Width - center.Width) / 2); center.Top = Math.Max(28, (home.Height - footer.Height - center.Height) / 2); }
+        void Place() { center.Width = Math.Min(620, Math.Max(260, home.Width - 32)); searchBox.Width = wordmark.Width = center.Width - 48; center.Left = Math.Max(16, (home.Width - center.Width) / 2); center.Top = Math.Max(28, (home.Height - footer.Height - center.Height) / 2); }
         home.Resize += (_, _) => Place(); tab.Controls.Add(home); tab.Home = home; Place(); home.BringToFront();
     }
     internal void OpenSettings() => OpenSettings("Privacy");
@@ -102,7 +111,7 @@ internal sealed partial class BrowserWindow
         var wrap = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(24), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         dialog.Controls.Add(wrap); dialog.Controls.Add(nav);
         var draft = prefs with { };
-        void Save() { draft.ProxyEnabled = prefs.ProxyEnabled; draft.ProxyPreset = prefs.ProxyPreset; draft.ProxyAddress = prefs.ProxyAddress; draft.AntiRedirect = prefs.AntiRedirect; draft.BlockAds = prefs.BlockAds; draft.Save(Path.Combine(root, "preferences.json")); prefs.Theme = draft.Theme; prefs.Accent = draft.Accent; prefs.Background = draft.Background; prefs.BackgroundFit = draft.BackgroundFit; prefs.Animations = draft.Animations; prefs.ShowFavorites = draft.ShowFavorites; prefs.ShowClock = draft.ShowClock; prefs.SearchEngine = draft.SearchEngine; prefs.Private = draft.Private; prefs.AllowHttp = draft.AllowHttp; prefs.SleepMinutes = draft.SleepMinutes; ApplyTheme(); Sync(); }
+        void Save() { draft.ProxyEnabled = prefs.ProxyEnabled; draft.ProxyPreset = prefs.ProxyPreset; draft.ProxyAddress = prefs.ProxyAddress; draft.AntiRedirect = prefs.AntiRedirect; draft.BlockAds = prefs.BlockAds; draft.Save(Path.Combine(root, "preferences.json")); prefs.Theme = draft.Theme; prefs.Accent = draft.Accent; prefs.Background = draft.Background; prefs.BackgroundFit = draft.BackgroundFit; prefs.Animations = draft.Animations; prefs.ShowFavorites = draft.ShowFavorites; prefs.ShowClock = draft.ShowClock; prefs.SearchEngine = draft.SearchEngine; prefs.Private = draft.Private; prefs.AllowHttp = draft.AllowHttp; prefs.SleepMinutes = draft.SleepMinutes; prefs.CheckUpdates = draft.CheckUpdates; prefs.ToolOrder = draft.ToolOrder ?? []; prefs.HiddenTools = draft.HiddenTools ?? []; LayoutTools(); ApplyTheme(); Sync(); }
         ComboBox Pick(string title, string[] choices, string value, Action<string> change) {
             wrap.Controls.Add(Caption(title)); var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 360 }; c.Items.AddRange(choices); c.SelectedItem = value; if (c.SelectedIndex < 0) c.SelectedIndex = 0; c.SelectedIndexChanged += (_, _) => change(c.Text); wrap.Controls.Add(c); return c;
         }
@@ -117,17 +126,27 @@ internal sealed partial class BrowserWindow
                 Toggle("Use my background", draft.Background, v => draft.Background = v);
                 wrap.Controls.Add(ActionButton("Choose image…", () => {
                     using var pick = new OpenFileDialog { Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp" }; if (pick.ShowDialog(dialog) != DialogResult.OK) return;
-                    try { if (new FileInfo(pick.FileName).Length > 20 * 1024 * 1024) throw new IOException("Choose an image under 20 MB."); using var input = Image.FromFile(pick.FileName); if ((long)input.Width * input.Height > 40000000) throw new IOException("Choose an image under 40 megapixels."); var scale = Math.Min(1d, 2560d / Math.Max(input.Width, input.Height)); using var small = new Bitmap(input, Math.Max(1, (int)(input.Width * scale)), Math.Max(1, (int)(input.Height * scale))); Directory.CreateDirectory(root); small.Save(Path.Combine(root, "background.tmp"), ImageFormat.Jpeg); File.Move(Path.Combine(root, "background.tmp"), Path.Combine(root, "background.jpg"), true); foreach (var tab in tabs.TabPages) if (tab.Home is HomeSurface h) h.Wallpaper = null; wallpaper?.Dispose(); wallpaper = null; draft.Background = true; Page(name); } catch (Exception ex) { MessageBox.Show(dialog, ex.Message); }
+                    try { if (new FileInfo(pick.FileName).Length > 20 * 1024 * 1024) throw new IOException("Choose an image under 20 MB."); using var input = Image.FromFile(pick.FileName); if ((long)input.Width * input.Height > 40000000) throw new IOException("Choose an image under 40 megapixels."); var scale = Math.Min(1d, 2560d / Math.Max(input.Width, input.Height)); using var small = new Bitmap(input, Math.Max(1, (int)(input.Width * scale)), Math.Max(1, (int)(input.Height * scale))); Directory.CreateDirectory(root); small.Save(Path.Combine(root, "background.tmp"), ImageFormat.Jpeg); File.Move(Path.Combine(root, "background.tmp"), Path.Combine(root, "background.jpg"), true); foreach (var tab in tabs.TabPages.Append(homePage)) if (tab.Home is HomeSurface h) h.Wallpaper = null; wallpaper?.Dispose(); wallpaper = null; draft.Background = true; Page(name); } catch (Exception ex) { MessageBox.Show(dialog, ex.Message); }
                 }));
                 Toggle("Startup animation (click or press a key to skip)", draft.Animations, v => draft.Animations = v);
-                Toggle("Show favorites on new tabs", draft.ShowFavorites, v => draft.ShowFavorites = v);
-                Toggle("Show date and time when opening a new tab", draft.ShowClock, v => draft.ShowClock = v);
+                Toggle("Show favorites on home", draft.ShowFavorites, v => draft.ShowFavorites = v);
+                Toggle("Show date and time on home", draft.ShowClock, v => draft.ShowClock = v);
                 Pick("Search engine", ["DuckDuckGo", "Brave Search"], draft.SearchEngine, v => draft.SearchEngine = v);
+            } else if (name == "Toolbar") {
+                wrap.Controls.Add(Caption("Choose the tools to show. Select a row, then move it up or down to change its order. The menu always stays available."));
+                var order = (draft.ToolOrder ?? []).Where(DefaultTools.Contains).Concat(DefaultTools).Distinct().ToArray();
+                var list = new CheckedListBox { Width = 420, Height = 170, CheckOnClick = true, BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None };
+                foreach (var item in order) list.Items.Add(item, !(draft.HiddenTools ?? []).Contains(item));
+                list.ItemCheck += (_, e) => { var hidden = (draft.HiddenTools ?? []).ToHashSet(); var item = list.Items[e.Index].ToString()!; if (e.NewValue == CheckState.Checked) hidden.Remove(item); else hidden.Add(item); draft.HiddenTools = hidden.ToArray(); };
+                wrap.Controls.Add(list);
+                void Move(int direction) { var i = list.SelectedIndex; var j = i + direction; if (i < 0 || j < 0 || j >= list.Items.Count) return; var items = list.Items.Cast<string>().ToArray(); (items[i], items[j]) = (items[j], items[i]); draft.ToolOrder = items; Page(name); wrap.Controls.OfType<CheckedListBox>().Single().SelectedIndex = j; }
+                var moves = new FlowLayoutPanel { Width = 420, Height = 54 }; moves.Controls.Add(ActionButton("Move up", () => Move(-1))); moves.Controls.Add(ActionButton("Move down", () => Move(1))); wrap.Controls.Add(moves);
+                wrap.Controls.Add(ActionButton("Restore all tools", () => { draft.ToolOrder = DefaultTools.ToArray(); draft.HiddenTools = []; Page(name); }));
             } else if (name == "Privacy") {
                 var block = new CheckBox { Text = "Block ads and trackers with uBlock Origin Lite", Checked = prefs.BlockAds, AutoSize = true, Margin = new Padding(0, 12, 0, 12) }; wrap.Controls.Add(block);
                 block.CheckedChanged += async (_, _) => { if (!block.Enabled) return; block.Enabled = false; try { await SetBlocking(block.Checked); draft.BlockAds = prefs.BlockAds; } catch (Exception ex) { block.Checked = prefs.BlockAds; MessageBox.Show(dialog, ex.Message); } finally { block.Enabled = true; } };
                 Toggle("Anti-redirect (also available beside Site files)", prefs.AntiRedirect, v => { SetAntiRedirect(v); draft.AntiRedirect = v; });
-                wrap.Controls.Add(Caption("Anti-redirect blocks HTTP redirects, automatic page navigation and new windows. It can interrupt sign-in and download chains. Use the blocked-destination button to inspect a link, or turn it off for a site you trust.", 10));
+                wrap.Controls.Add(Caption("Anti-redirect allows normal links, server redirect chains and same-site navigation. It stops unsolicited cross-site page changes. A file you select in Site files gets one short download handoff. Use its menu to inspect a blocked destination.", 10));
                 Toggle("Temporary browsing data (applies after restart)", draft.Private, v => draft.Private = v);
                 Toggle("Allow unencrypted HTTP sites", draft.AllowHttp, v => draft.AllowHttp = v);
                 wrap.Controls.Add(Caption("Strict tracking prevention, certificate validation and site-permission denial stay enabled. Downloads, favorites and local download history persist in temporary mode. Your public IP is not hidden by temporary browsing.", 10));
@@ -146,13 +165,16 @@ internal sealed partial class BrowserWindow
                 wrap.Controls.Add(Caption("Why is this such a good browser?", 18));
                 wrap.Controls.Add(Caption("The aim is simple: useful controls without clutter. Ad and tracker blocking is on by default, temporary browsing data is the default, and there is no N0VA analytics service. The native interface shares the installed WebView2 runtime and sleeps idle tabs."));
                 wrap.Controls.Add(Caption("Those are design choices, not a claim of perfect privacy or best-in-class performance. Microsoft runtime services can contact Microsoft. This is an unsigned, unaudited preview, and public IP privacy needs a working VPN or proxy."));
-                wrap.Controls.Add(Caption("N0VA Browser 0.2.0 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
+                wrap.Controls.Add(Caption("N0VA Browser 0.3.0 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
                 wrap.Controls.Add(ActionButton("Credits", () => { dialog.Close(); OpenCredits(); }));
+                Toggle("Check for app updates when N0VA opens", draft.CheckUpdates, v => draft.CheckUpdates = v);
+                wrap.Controls.Add(Caption("Checks GitHub through your current connection. You can choose No when an update is offered; installers never run automatically.", 10));
+                wrap.Controls.Add(ActionButton("Check now", () => { dialog.Close(); _ = CheckForUpdate(true); }));
                 wrap.Controls.Add(ActionButton("Project & updates", () => { dialog.Close(); _ = Navigate(AddTab(), "https://github.com/N0VALID/N0VA/releases"); }));
             }
             wrap.Controls.Add(ActionButton("Save preferences", () => { try { Save(); dialog.Close(); } catch (Exception ex) { MessageBox.Show(dialog, ex.Message); } }));
         }
-        foreach (var name in new[] { "Privacy", "Appearance", "Connection & IP", "Downloads", "Performance", "About" }) { var b = ActionButton(name, () => Page(name)); b.Width = 145; nav.Controls.Add(b); }
+        foreach (var name in new[] { "Privacy", "Appearance", "Toolbar", "Connection & IP", "Downloads", "Performance", "About" }) { var b = ActionButton(name, () => Page(name)); b.Width = 145; nav.Controls.Add(b); }
         Page(selected); dialog.ShowDialog(this);
     }
     static string RuntimeVersion() { try { return Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch { return "not installed"; } }

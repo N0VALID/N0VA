@@ -54,6 +54,9 @@ internal sealed record Preferences
     public bool ShowClock { get; set; }
     public string BackgroundFit { get; set; } = "Fill";
     public string SearchEngine { get; set; } = "DuckDuckGo";
+    public bool CheckUpdates { get; set; } = true;
+    public string[] ToolOrder { get; set; } = [];
+    public string[] HiddenTools { get; set; } = [];
     public bool AntiRedirect { get; set; }
     public bool ProxyEnabled { get; set; }
     public int ProxyPreset { get; set; }

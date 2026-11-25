@@ -42,7 +42,7 @@ internal sealed partial class BrowserWindow
         var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 160, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
         head.Controls.Add(panelTitle); head.Controls.Add(panelHint);
         refreshFiles = ActionButton("Refresh links", () => _ = RefreshFiles()); head.Controls.Add(refreshFiles);
-        head.Controls.Add(ActionButton("Close", () => downloads.Visible = false));
+        head.Controls.Add(ActionButton("Close", () => downloadPopup.Close()));
         downloads.Controls.Add(fileList); downloads.Controls.Add(transfers); downloads.Controls.Add(head);
         transfers.Visible = false;
     }
@@ -51,10 +51,10 @@ internal sealed partial class BrowserWindow
         siteFilesMode = site; panelTitle.Text = site ? "Site files" : "Downloads";
         panelHint.Text = site ? "Links found on this page. Release lists load only when you request them." : "Your transfers and saved history. Files never run automatically.";
         refreshFiles!.Visible = site; fileList.Visible = site; transfers.Visible = !site;
-        downloads.Visible = true;
+        ShowDownloadsPopup();
     }
-    void ToggleDownloads() { if (downloads.Visible && siteFilesMode) { downloads.Visible = false; return; } PanelMode(true); _ = RefreshFiles(); }
-    void ShowTransfers() { PanelMode(false); RenderTransfers(); }
+    void ToggleDownloads() { if (DownloadsOpen && siteFilesMode) { downloadPopup.Close(); return; } PanelMode(true); _ = RefreshFiles(); }
+    internal void ShowTransfers() { PanelMode(false); RenderTransfers(); }
     internal async Task<List<PageFile>> ScanFiles(SiteTab t)
     {
         if (!t.Ready) return [];
@@ -66,7 +66,7 @@ internal sealed partial class BrowserWindow
         if (!siteFilesMode) return;
         var generation = ++scanGeneration; var t = Current;
         ClearControls(fileList);
-        if (t?.Ready != true) { if (downloads.Visible) downloads.Visible = false; return; }
+        if (t?.Ready != true) { if (DownloadsOpen) downloadPopup.Close(); return; }
         try {
             var links = await ScanFiles(t);
             if (closing || generation != scanGeneration || t != Current) return;
@@ -94,7 +94,7 @@ internal sealed partial class BrowserWindow
         }
         card.Controls.Add(ActionButton(link.Kind == "File" ? "Open / download…" : "Open download page", () => {
             if (Current != tab || !Policy.WebUrl(link.Url, prefs.AllowHttp)) return;
-            if (MessageBox.Show(this, link.Url + "\n\nOpen this link? The website controls its contents.", "Download source", MessageBoxButtons.OKCancel) == DialogResult.OK) _ = Navigate(tab, link.Url);
+            if (MessageBox.Show(this, link.Url + "\n\nOpen this link? The website controls its contents.", "Download source", MessageBoxButtons.OKCancel) == DialogResult.OK) _ = Navigate(tab, link.Url, downloadHandoff: link.Kind == "File");
         }));
         fileList.Controls.Add(card);
     }

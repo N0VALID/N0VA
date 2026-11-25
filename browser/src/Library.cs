@@ -36,6 +36,7 @@ internal sealed partial class BrowserWindow
             link.LinkClicked += async (_, _) => await Navigate(AddTab(), url); panel.Controls.Add(link);
         }
         panel.Controls.Add(Caption("Built with Microsoft WebView2 and uBlock Origin Lite. Independent of Brave, LibreWolf and the uBlock Origin project.", 10));
-        tab.Controls.Add(panel); Sync();
+        panel.Controls.Add(ActionButton("Back to home", () => AddTab()));
+        tab.Home = panel; tab.Controls.Add(panel); Sync();
     }
 }

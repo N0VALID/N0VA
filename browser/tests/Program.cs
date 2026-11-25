@@ -24,11 +24,21 @@ try {
 } finally { Directory.Delete(root, true); }
 Console.WriteLine($"{count} security and persistence checks passed.");
 var guard = new RedirectGuard(); guard.Permit("https://example.com/");
-Check(!guard.Blocks("https://example.com/", true, false, false), "Explicit browser navigation allowed");
-Check(guard.Blocks("https://example.com/next", true, true, true), "Server redirect blocked even after gesture");
-Check(guard.Blocks("https://example.com/next", true, false, false), "Script navigation blocked");
-Check(!guard.Blocks("https://example.com/next", true, false, true), "Clicked link allowed");
+Check(!guard.Blocks("https://example.com/", true, false, false, 1), "Explicit browser navigation allowed");
+Check(!guard.Blocks("https://cdn.example/file", true, true, false, 1), "Authorized server redirect chain allowed");
+Check(guard.Blocks("https://cdn.example/file", true, true, false, 2), "Unrelated redirect chain blocked");
+guard.Completed(1);
+Check(guard.Blocks("https://elsewhere.example/", true, false, false, 3, "https://example.com/"), "Automatic cross-site navigation blocked");
+Check(!guard.Blocks("https://example.com/next", true, false, false, 4, "https://example.com/"), "Same-origin automatic navigation allowed");
+Check(!guard.Blocks("https://elsewhere.example/", true, false, true, 5, "https://example.com/"), "Clicked cross-site link allowed");
 Check(!guard.Blocks("https://example.com/next", false, true, false), "Redirect toggle off");
+guard.Permit("https://example.com/file", true);
+Check(!guard.Blocks("https://example.com/file", true, false, false, 6), "Selected file allowed"); guard.Completed(6);
+Check(!guard.Blocks("https://cdn.example/file", true, false, false, 7, "https://example.com/"), "One selected-file handoff allowed"); guard.Completed(7);
+Check(guard.Blocks("https://ads.example/", true, false, false, 8, "https://cdn.example/"), "Download handoff allowance cannot be reused");
+guard.Permit("https://example.com/"); guard.Blocks("https://example.com/", true, false, false, 9);
+for (int i = 0; i < 20; i++) Check(!guard.Blocks("https://cdn.example/" + i, true, true, false, 9), "Bounded redirect chain allowed");
+Check(guard.Blocks("https://cdn.example/21", true, true, false, 9), "Redirect loop bounded");
 foreach (var bad in new[] { "http://a:80 --no-sandbox", "http://a:80;direct://", "socks5://user:pass@host:1080", "http://host:0", "http://host:65536", "http://host:80/path", "file://host:22" }) {
     try { ConnectionPolicy.Validate(bad); throw new Exception("Accepted unsafe proxy " + bad); } catch (ArgumentException) { count++; }
 }
@@ -53,3 +63,16 @@ if (args.Contains("--check-rustdesk")) {
     Check(live.Any(x => x.Name.EndsWith(".exe")) && live.Any(x => x.Name.EndsWith(".msi")), "Live RustDesk Windows assets");
     Console.WriteLine($"Live RustDesk check: {live.Count} release assets, Windows EXE and MSI found.");
 }
+
+string UpdateJson(string name, string url, bool draft = false) => System.Text.Json.JsonSerializer.Serialize(new[] { new { draft, assets = new[] { new { name, browser_download_url = url } } } });
+var updateName = "N0VA-Browser-Setup-9.0.0-x64.exe";
+var updateUrl = "https://github.com/N0VALID/N0VA/releases/download/v9/" + updateName;
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl))?.Version == new Version(9, 0, 0), "Newer preview installer offered");
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl, true)) == null, "Draft not offered");
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl.Replace("github.com", "evil.example"))) == null, "Untrusted update host rejected");
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl.Replace("N0VALID", "other"))) == null, "Wrong update repository rejected");
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl + "?redirect=other")) == null, "Update query rejected");
+Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl.Replace(updateName, "other.exe"))) == null, "Update asset name must match URL");
+Check(UpdatePolicy.Parse(UpdateJson(updateName.Replace("9.0.0", UpdatePolicy.Current), updateUrl.Replace("9.0.0", UpdatePolicy.Current))) == null, "Installed version is not offered again");
+Check(new Preferences().CheckUpdates && new Preferences().HiddenTools.Length == 0, "New installs check for updates and show every tool");
+Console.WriteLine($"{count} total checks passed.");

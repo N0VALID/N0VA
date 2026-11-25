@@ -24,14 +24,32 @@ internal static class ConnectionPolicy
         (endpoint == "" ? "" : " --proxy-server=" + Validate(endpoint) + " --proxy-bypass-list=<-loopback> --disable-quic");
 }
 
+// Track one user-authorized navigation chain. Automatic cross-origin changes
+// after completion need a new gesture, except one short download handoff.
 internal sealed class RedirectGuard
 {
     string? permitted;
-    public void Permit(string target) { permitted = new Uri(target).AbsoluteUri; }
-    public bool Blocks(string target, bool enabled, bool redirected, bool userInitiated)
+    ulong? trusted;
+    int redirects;
+    DateTime handoffUntil;
+    public void Permit(string target, bool downloadHandoff = false)
     {
-        var direct = !redirected && Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.AbsoluteUri == permitted;
-        permitted = null;
-        return enabled && (redirected || !userInitiated && !direct);
+        permitted = new Uri(target).AbsoluteUri;
+        handoffUntil = downloadHandoff ? DateTime.UtcNow.AddSeconds(10) : DateTime.MinValue;
     }
+    public bool Blocks(string target, bool enabled, bool redirected, bool userInitiated, ulong navigationId = 0, string? currentUrl = null)
+    {
+        if (!Uri.TryCreate(target, UriKind.Absolute, out var uri)) return true;
+        var direct = !redirected && uri.AbsoluteUri == permitted;
+        permitted = null;
+        if (!enabled) return false;
+        if (redirected) return trusted != navigationId || ++redirects > 20;
+        var sameOrigin = Uri.TryCreate(currentUrl, UriKind.Absolute, out var current) && uri.GetLeftPart(UriPartial.Authority) == current.GetLeftPart(UriPartial.Authority);
+        if (!direct && !userInitiated && !sameOrigin) {
+            if (DateTime.UtcNow > handoffUntil) return true;
+            handoffUntil = DateTime.MinValue;
+        }
+        trusted = navigationId; redirects = 0; return false;
+    }
+    public void Completed(ulong navigationId) { if (trusted == navigationId) trusted = null; }
 }
