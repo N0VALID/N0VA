@@ -52,13 +52,15 @@ jobs:
           path: |
             browser/out/smoke-result.txt
             browser/out/smoke.png
+            browser/out/settings.png
+            browser/out/settings-error.txt
             browser/out/proxy-result.txt
           if-no-files-found: warn
       - name: Build setup wizard
         shell: pwsh
         run: |
           if (!(Test-Path browser/out/licenses/webview2/LICENSE.txt) -or !(Get-ChildItem browser/out/licenses/runtime -Recurse -Filter THIRD-PARTY-NOTICES.TXT)) { throw 'Redistribution notices missing' }
-          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt -ErrorAction SilentlyContinue
+          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt,browser/out/settings.png,browser/out/settings-error.txt -ErrorAction SilentlyContinue
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
           if ($LASTEXITCODE) { throw 'Installer compilation failed' }
       - name: Test installation and desktop shortcut

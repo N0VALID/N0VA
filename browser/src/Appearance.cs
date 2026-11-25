@@ -94,7 +94,7 @@ internal sealed partial class BrowserWindow
         void Place() { center.Width = Math.Min(620, Math.Max(260, home.Width - 32)); search.Width = center.Width - 48; center.Left = Math.Max(16, (home.Width - center.Width) / 2); center.Top = Math.Max(28, (home.Height - footer.Height - center.Height) / 2); }
         home.Resize += (_, _) => Place(); tab.Controls.Add(home); tab.Home = home; Place(); home.BringToFront();
     }
-    void OpenSettings() => OpenSettings("Privacy");
+    internal void OpenSettings() => OpenSettings("Privacy");
     void OpenSettings(string selected)
     {
         using var dialog = new Form { Text = "N0VA · Settings", Size = new Size(880, 740), MinimumSize = new Size(760, 600), StartPosition = FormStartPosition.CenterParent, BackColor = Surface, ForeColor = Ink, Font = Font, ShowInTaskbar = false };

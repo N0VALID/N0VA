@@ -88,11 +88,9 @@ internal static class Smoke
                 await window.Navigate(t, origin + "/release");
                 deadline = DateTime.UtcNow.AddSeconds(10); while (c.DocumentTitle != "Release fixture" && DateTime.UtcNow < deadline) await Task.Delay(100);
                 if (!(await window.ScanFiles(t)).Any(x => x.Kind == "Release" && x.Url.Contains("rustdesk/rustdesk"))) throw new Exception("RustDesk release-link pattern not detected");
-                await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[\"*blocked-pixel*\"]}");
-                await c.ExecuteScriptAsync("const p = new Image(); p.src = '/blocked-pixel.png'; document.body.append(p);");
+                await c.ExecuteScriptAsync("const p = new Image(); p.src = 'https://ad.doubleclick.net/nova-block-check.gif'; document.body.append(p);");
                 deadline = DateTime.UtcNow.AddSeconds(10); while (window.BlockedRequests == 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
                 if (window.BlockedRequests == 0) throw new Exception("Runtime blocked-request counter did not update: " + window.LastNetworkFailure);
-                await c.CallDevToolsProtocolMethodAsync("Network.setBlockedURLs", "{\"urls\":[]}");
                 var savedFile = Path.Combine(root, "app.zip");
                 bool pickerCalled = false;
                 window.TestDownloadPicker = (name, source) => { pickerCalled = name == "app.zip" && source == "127.0.0.1"; return savedFile; };
@@ -124,9 +122,29 @@ internal static class Smoke
                 if (Preferences.Load(Path.Combine(root, "preferences.json")).Theme != "Paper") throw new Exception("Settings did not persist");
                 if (!Library.Load(Path.Combine(root, "library.json")).Transfers.Any(d => d.Name == "app.zip" && d.State == "Completed")) throw new Exception("Download history did not persist");
                 window.Preferences.Theme = "Graphite";
+                using (var ui = new System.Windows.Forms.Timer { Interval = 100 }) {
+                    ui.Tick += (_, _) => {
+                        var settings = Application.OpenForms.Cast<Form>().FirstOrDefault(f => f.Text == "N0VA · Settings"); if (settings == null) return;
+                        ui.Stop();
+                        try {
+                            var nav = settings.Controls.OfType<FlowLayoutPanel>().Single(p => p.Dock == DockStyle.Left);
+                            nav.Controls.OfType<Button>().Single(b => b.Text == "Appearance").PerformClick();
+                            var body = settings.Controls.OfType<FlowLayoutPanel>().Single(p => p.Dock == DockStyle.Fill);
+                            body.Controls.OfType<ComboBox>().ElementAt(1).SelectedItem = "Blue";
+                            using var settingsShot = new Bitmap(settings.Width, settings.Height); settings.DrawToBitmap(settingsShot, new Rectangle(0, 0, settings.Width, settings.Height)); settingsShot.Save(Path.Combine(AppContext.BaseDirectory, "settings.png"));
+                            body.Controls.OfType<Button>().Single(b => b.Text == "Save preferences").PerformClick();
+                        } catch (Exception error) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "settings-error.txt"), error.ToString()); settings.Close(); }
+                    };
+                    ui.Start(); window.OpenSettings();
+                }
+                if (Preferences.Load(Path.Combine(root, "preferences.json")).Accent != "Blue") throw new Exception("Settings UI did not save appearance");
                 window.OpenCredits();
                 var linksInCredits = window.Current!.Controls.OfType<FlowLayoutPanel>().SelectMany(p => p.Controls.OfType<LinkLabel>()).Select(l => l.Text).ToArray();
                 if (!linksInCredits.Contains("https://github.com/N0VALID/N0VA/") || !linksInCredits.Contains("https://guns.lol/n0valid")) throw new Exception("Credit links missing");
+                var panel = window.Controls.OfType<Panel>().First(p => p.Dock == DockStyle.Right);
+                var header = panel.Controls.OfType<FlowLayoutPanel>().First(p => p.Dock == DockStyle.Top);
+                var close = header.Controls.OfType<Button>().Single(b => b.Text == "Close");
+                if (close.Bottom > header.ClientSize.Height) throw new Exception("Download panel Close control is clipped"); close.PerformClick();
                 window.AddTab();
                 if (window.SiteFilesButtonVisible) throw new Exception("Site files visible on new tab");
                 window.WindowState = FormWindowState.Maximized; await Task.Delay(150);
