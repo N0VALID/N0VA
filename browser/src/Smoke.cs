@@ -80,9 +80,10 @@ internal static class Smoke
                 window.SetAntiRedirect(true);
                 foreach (var path in new[] { "/redirect", "/same" }) {
                     await window.Navigate(t, origin + path);
+                    var expected = (path == "/redirect" ? origin.Replace("127.0.0.1", "localhost") : origin) + "/arrived";
                     deadline = DateTime.UtcNow.AddSeconds(10);
-                    while ((c.DocumentTitle != "Arrived" || t.Loading) && DateTime.UtcNow < deadline) await Task.Delay(100);
-                    if (t.BlockedNavigation != null || c.DocumentTitle != "Arrived") throw new Exception("Legitimate redirect blocked: " + path);
+                    while ((c.Source != expected || c.DocumentTitle != "Arrived" || t.Loading) && DateTime.UtcNow < deadline) await Task.Delay(100);
+                    if (t.BlockedNavigation != null || c.Source != expected || c.DocumentTitle != "Arrived") throw new Exception("Legitimate redirect blocked: " + path);
                 }
                 foreach (var path in new[] { "/script", "/meta" }) {
                     await window.Navigate(t, origin + path);

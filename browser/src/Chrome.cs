@@ -8,14 +8,32 @@ internal sealed class SoftButton : Button
     public SoftButton() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true); }
     protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { hovered = false; Invalidate(); base.OnMouseLeave(e); }
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        var size = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        return new Size(Math.Max(MinimumSize.Width, size.Width + 28), Math.Max(MinimumSize.Height, size.Height + 14));
+    }
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = SoftSurface.Shape(new Rectangle(1, 1, Width - 3, Height - 3), 12);
         using var brush = new SolidBrush(hovered ? ControlPaint.Light(BackColor, .12f) : BackColor); e.Graphics.FillPath(brush, path);
         using var pen = new Pen(Color.FromArgb(70, ForeColor)); e.Graphics.DrawPath(pen, path);
-        TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(8, 2, Width - 16, Height - 4), Enabled ? ForeColor : SystemColors.GrayText, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(8, 2, Width - 16, Height - 4), Enabled ? ForeColor : SystemColors.GrayText, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(6, 5, Width - 12, Height - 10));
+    }
+}
+internal sealed class ChromeRenderer : ToolStripProfessionalRenderer
+{
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { }
+    protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
+    {
+        if (!e.Item.Selected && !e.Item.Pressed && (e.Item is not ToolStripButton b || !b.Checked)) return;
+        var color = e.Item.Owner?.BackColor ?? Color.FromArgb(30, 32, 31);
+        var dark = color.GetBrightness() < .5f;
+        using var brush = new SolidBrush(dark ? Color.FromArgb(Math.Min(255, color.R + 24), Math.Min(255, color.G + 24), Math.Min(255, color.B + 24)) : ControlPaint.Dark(color, .06f));
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var shape = SoftSurface.Shape(new Rectangle(2, 2, e.Item.Width - 4, e.Item.Height - 4), 10); e.Graphics.FillPath(brush, shape);
     }
 }
 internal sealed class SoftSurface : SmoothPanel

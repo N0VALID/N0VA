@@ -73,6 +73,7 @@ internal sealed partial class BrowserWindow : Form
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Controls.Add(tabs); Controls.Add(chrome); Controls.Add(statusBar);
         toolbar.Dock = DockStyle.None; toolbar.AutoSize = false; toolbar.Padding = Padding.Empty;
+        toolbar.Renderer = new ChromeRenderer(); toolsBar.Renderer = new ChromeRenderer();
         chrome.Controls.Add(toolbar); chrome.Controls.Add(addressHost); chrome.Controls.Add(toolsBar);
         addressHost.Controls.Add(address); addressHost.Controls.Add(bookmark); bookmark.Click += (_, _) => BookmarkCurrent();
         tabs.SetHome(homePage); statusBar.Items.Add(status);
@@ -136,6 +137,7 @@ internal sealed partial class BrowserWindow : Form
             (blockerReady ? (prefs.BlockAds ? "uBlock Origin Lite active" : "Ad blocking off") + " · Strict tracking prevention" : "Protection loads before your first website") +
             (c?.Source.StartsWith("http:") == true ? "  ·  HTTP: connection is not encrypted" : "");
         antiRedirect.Checked = prefs.AntiRedirect; antiRedirect.ToolTipText = "Anti-redirect: " + (prefs.AntiRedirect ? "on" : "off") + (t?.BlockedNavigation != null ? " · blocked destination available" : "");
+        antiRedirect.ForeColor = prefs.AntiRedirect ? Accent : Ink;
         status.Text += connection == "" ? " · System connection" : " · Proxy route configured";
         Fit(); tabs.Invalidate();
     }
