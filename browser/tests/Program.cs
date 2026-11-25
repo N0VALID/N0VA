@@ -76,3 +76,27 @@ Check(UpdatePolicy.Parse(UpdateJson(updateName, updateUrl.Replace(updateName, "o
 Check(UpdatePolicy.Parse(UpdateJson(updateName.Replace("9.0.0", UpdatePolicy.Current), updateUrl.Replace("9.0.0", UpdatePolicy.Current))) == null, "Installed version is not offered again");
 Check(new Preferences().CheckUpdates && new Preferences().HiddenTools.Length == 0, "New installs check for updates and show every tool");
 Console.WriteLine($"{count} total checks passed.");
+foreach (var engine in Policy.SearchEngines) {
+    var destination = Policy.Destination("one & two", engine);
+    Check(destination.Contains("one%20%26%20two"), "Search query encoded for " + engine);
+}
+Check(Policy.Destination("test words", "Google").StartsWith("https://www.google.com/search?q="), "Google route");
+Check(DownloadDiscovery.Official("https://www.fortnite.com/download")?.Url == DownloadDiscovery.EpicInstaller, "Fortnite offers verified Epic launcher route");
+Check(DownloadDiscovery.Official("https://store.epicgames.com/en-US/p/fortnite") != null, "Epic store launcher discovery");
+Check(DownloadDiscovery.Official("https://fortnite.com.evil.example/download") == null && DownloadDiscovery.Official("http://www.fortnite.com/download") == null, "No official link mapping on spoofed or insecure origins");
+var actions = Policy.ParseLinks("""[{"name":"Download PC","url":"https://example.com/","kind":"Action","actionId":"n1"},{"name":"Download Mac","url":"https://example.com/","kind":"Action","actionId":"n2"}]""", false);
+Check(actions.Count == 2, "Separate download buttons preserved");
+var proxyListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); proxyListener.Start();
+var probeEndpoint = "http://127.0.0.1:" + ((System.Net.IPEndPoint)proxyListener.LocalEndpoint).Port;
+var serveProbe = Task.Run(async () => {
+    using var client = await proxyListener.AcceptTcpClientAsync(); using var stream = client.GetStream(); using var reader = new StreamReader(stream, leaveOpen: true);
+    var request = await reader.ReadLineAsync(); while (await reader.ReadLineAsync() is { Length: > 0 }) { }
+    var body = "203.0.113.8";
+    var bytes = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n" + body); await stream.WriteAsync(bytes);
+    return request;
+});
+var routeCheck = await ConnectionProbe.Check(probeEndpoint, "http://probe.invalid/check");
+Check(routeCheck.Success && routeCheck.Message.Contains("203.0.113.8"), "Connection test reads IP through proxy");
+Check((await serveProbe)?.StartsWith("GET http://probe.invalid/check ") == true, "Connection test uses selected proxy"); proxyListener.Stop();
+Check(!(await ConnectionProbe.Check(probeEndpoint, "http://probe.invalid/check")).Success, "Unavailable proxy test fails");
+Console.WriteLine($"{count} total checks passed.");

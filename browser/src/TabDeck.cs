@@ -15,6 +15,9 @@ internal sealed class TabDeck : SmoothPanel
     readonly Button plus = new SoftButton { Text = "+", AccessibleName = "Open home to add a website", Width = 34, Height = 33, Margin = new Padding(4, 0, 4, 0) };
     readonly Dictionary<SiteTab, (Panel Row, Button Title, Button Close)> buttons = [];
     int selected = -1;
+    bool showStrip = true;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool ShowStrip { get => showStrip; set { showStrip = value; strip.Visible = value && TabCount > 0; } }
     Control? home;
     public void SetHome(Control page) { home = page; page.Dock = DockStyle.Fill; Controls.Add(page); page.BringToFront(); strip.SendToBack(); page.Visible = selected < 0; }
     Color ink = Color.WhiteSmoke, accent = Color.DarkSeaGreen;
@@ -44,7 +47,7 @@ internal sealed class TabDeck : SmoothPanel
     }
     void Add(SiteTab tab)
     {
-        strip.Visible = true;
+        strip.Visible = showStrip;
         tab.Dock = DockStyle.Fill; tab.Visible = false; Controls.Add(tab); tab.BringToFront(); strip.SendToBack();
         var row = new SmoothPanel { Width = 195, Height = 33, Padding = new Padding(0, 0, 0, 3), Margin = new Padding(2, 0, 2, 0) };
         var title = new Button { Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), AutoEllipsis = true, UseMnemonic = false };
@@ -58,7 +61,7 @@ internal sealed class TabDeck : SmoothPanel
     void Remove(SiteTab tab, int index)
     {
         Controls.Remove(tab); if (buttons.Remove(tab, out var b)) { strip.Controls.Remove(b.Row); b.Row.Dispose(); }
-        strip.Visible = TabCount > 0;
+        strip.Visible = showStrip && TabCount > 0;
         var next = TabCount == 0 ? -1 : Math.Clamp(selected > index ? selected - 1 : selected, 0, TabCount - 1);
         selected = -2; SelectedIndex = next;
     }

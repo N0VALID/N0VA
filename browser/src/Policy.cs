@@ -5,6 +5,7 @@ namespace Nova;
 
 internal static partial class Policy
 {
+    public static readonly string[] SearchEngines = ["DuckDuckGo", "Brave Search", "Google", "Bing"];
     public static bool WebUrl(string? text, bool allowHttp = false) =>
         Uri.TryCreate(text, UriKind.Absolute, out var u) && u.UserInfo.Length == 0 &&
         (u.Scheme == "https" || allowHttp && u.Scheme == "http");
@@ -19,7 +20,7 @@ internal static partial class Policy
             throw new ArgumentException("Only HTTPS website addresses are supported (HTTP is optional in Settings).");
         if (!text.Any(char.IsWhiteSpace) && WebUrl("https://" + text) &&
             (new Uri("https://" + text).Host.Contains('.') || text == "localhost")) return "https://" + text;
-        return (engine == "Brave Search" ? "https://search.brave.com/search?q=" : "https://duckduckgo.com/?q=") + Uri.EscapeDataString(text);
+        return (engine switch { "Brave Search" => "https://search.brave.com/search?q=", "Google" => "https://www.google.com/search?q=", "Bing" => "https://www.bing.com/search?q=", _ => "https://duckduckgo.com/?q=" }) + Uri.EscapeDataString(text);
     }
 
     public static string SafeFileName(string value)
@@ -37,10 +38,10 @@ internal static partial class Policy
     public static List<PageFile> ParseLinks(string json, bool allowHttp) =>
         (JsonSerializer.Deserialize<List<PageFile>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [])
         .Where(x => x != null && x.Url != null && x.Name != null && x.Url.Length <= 8192 && WebUrl(x.Url, allowHttp))
-        .DistinctBy(x => x.Url).Take(100).Select(x => x with { Name = SafeFileName(x.Name) }).ToList();
+        .DistinctBy(x => x.Kind == "Action" ? x.Url + "#" + x.ActionId : x.Url).Take(100).Select(x => x with { Name = SafeFileName(x.Name) }).ToList();
 }
 
-internal record PageFile(string Name, string Url, string Kind = "File");
+internal record PageFile(string Name, string Url, string Kind = "File", string? ActionId = null);
 
 internal sealed record Preferences
 {

@@ -6,6 +6,10 @@ internal static class Program
     static int Main(string[] args)
     {
         if (args.Contains("--check-runtime")) { try { Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString(); return 0; } catch { return 2; } }
+        var waitIndex = Array.IndexOf(args, "--wait-for-exit");
+        if (waitIndex >= 0 && waitIndex + 1 < args.Length && int.TryParse(args[waitIndex + 1], out var previous) && previous != Environment.ProcessId) {
+            try { using var process = System.Diagnostics.Process.GetProcessById(previous); process.WaitForExit(10000); } catch (ArgumentException) { }
+        }
         ApplicationConfiguration.Initialize();
         if (args.Contains("--smoke-test") || args.Contains("--proxy-smoke-test")) {
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
@@ -18,9 +22,12 @@ internal static class Program
         Directory.CreateDirectory(root);
         Cleanup(Path.Combine(root, "Sessions"));
         Cleanup(Path.Combine(root, "Blocker"));
-        try { using var window = new BrowserWindow(root); Application.Run(window); return 0; }
+        bool restart = false;
+        try { using var window = new BrowserWindow(root); Application.Run(window); restart = window.RestartRequested; }
         catch (Exception ex) { MessageBox.Show(ex.Message, "N0VA Browser could not start"); return 1; }
         finally { Cleanup(Path.Combine(root, "Sessions")); }
+        if (restart) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { ArgumentList = { "--wait-for-exit", Environment.ProcessId.ToString() }, UseShellExecute = false });
+        return 0;
     }
     public static void Cleanup(string directory)
     {

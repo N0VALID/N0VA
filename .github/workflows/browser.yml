@@ -54,6 +54,8 @@ jobs:
             browser/out/smoke.png
             browser/out/settings.png
             browser/out/connection.png
+            browser/out/background.png
+            browser/out/downloads.png
             browser/out/settings-error.txt
             browser/out/proxy-result.txt
           if-no-files-found: warn
@@ -61,7 +63,7 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path browser/out/licenses/webview2/LICENSE.txt) -or !(Get-ChildItem browser/out/licenses/runtime -Recurse -Filter THIRD-PARTY-NOTICES.TXT)) { throw 'Redistribution notices missing' }
-          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt,browser/out/settings.png,browser/out/settings-error.txt,browser/out/connection.png -ErrorAction SilentlyContinue
+          Remove-Item browser/out/smoke-result.txt,browser/out/smoke.png,browser/out/proxy-result.txt,browser/out/settings.png,browser/out/settings-error.txt,browser/out/connection.png,browser/out/background.png,browser/out/downloads.png -ErrorAction SilentlyContinue
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" browser/installer/Nova.iss
           if ($LASTEXITCODE) { throw 'Installer compilation failed' }
       - name: Test installation and desktop shortcut
@@ -105,10 +107,12 @@ jobs:
           cat > notes.txt <<'NOTES'
           Windows x64 preview of N0VA Browser. Download the Setup.exe and run the wizard; it creates a desktop shortcut. The Microsoft WebView2 runtime is installed if needed.
 
-          A cleaner browser interface: centered rounded address bar, compact right-side dropdown tools, hide/reorder controls, smaller home buttons, and a smoother wordmark reveal. N0VA home stays outside the website tabs. Download panels no longer resize pages. Normal server/download redirect chains now work with anti-redirect enabled; unsolicited cross-site navigation is still blocked. The Connection window now opens and shows saved-route restart feedback. Startup update prompts include Yes and No; startup checks can be disabled in About.
+          Smaller rounded home card, transparent wallpaper footer controls, a compact stats badge, corrected corner painting, and hover/menu effects. Favorites have directly clickable icons, and the bookmark star sits beside the address field. Search choices include DuckDuckGo, Brave Search, Google and Bing. Ctrl+T/Ctrl+W now work inside web content, and F11 enters/leaves fullscreen.
+
+          Site files refreshes automatically while open, finds dynamic and open-shadow links, highlights download buttons, and offers Epic's Windows launcher on Fortnite/Epic pages. Proxy routes are tested before saving; unavailable routes show actionable feedback. Use Windows connection and Restart now help recover from a previously unavailable proxy. Tor/Mullvad still require their external service to be running.
 
           Includes official uBlock Origin Lite, strict tracking prevention, site-file and GitHub release discovery, favorites, local download history, saved backgrounds/themes and proxy presets. Presets require your own working VPN/proxy; no service subscription or Tor client is bundled. Connection changes apply after restart.
 
           This is an unsigned, unaudited preview. It is not Brave/LibreWolf-equivalent hardening. Microsoft runtime updates are automatic; N0VA can offer a newer installer; run it to update the app and bundled filters. See browser/README.md and browser/SECURITY.md for limits and build instructions. SHA256SUMS.txt accompanies the installer.
           NOTES
-          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.3.0 preview" --prerelease --notes-file notes.txt
+          gh release create "$tag" release/* --target "$COMMIT_SHA" --title "N0VA Browser 0.4.0 preview" --prerelease --notes-file notes.txt

@@ -60,49 +60,55 @@ internal sealed partial class BrowserWindow
     void ApplyTheme()
     {
         SuspendLayout(); BackColor = Surface; ForeColor = Ink; toolbar.BackColor = Surface; toolbar.ForeColor = Ink;
-        chrome.BackColor = toolsBar.BackColor = addressHost.BackColor = bookmark.BackColor = Surface;
+        chrome.BackColor = toolsBar.BackColor = favoriteBar.BackColor = Surface; addressHost.FillColor = InputSurface; searchProvider.ForeColor = Ink; SoftButton.MotionEnabled = prefs.Animations;
         chrome.ForeColor = toolsBar.ForeColor = addressHost.ForeColor = bookmark.ForeColor = Ink;
         statusBar.BackColor = Surface; statusBar.ForeColor = Ink; downloads.BackColor = Surface; downloads.ForeColor = Ink;
-        address.BackColor = Surface; address.ForeColor = Ink; tabs.Theme(Surface, Ink, Accent);
+        address.BackColor = InputSurface; address.ForeColor = Ink; tabs.Theme(Surface, Ink, Accent);
         foreach (var tab in tabs.TabPages) tab.BackColor = Surface;
-        RefreshHomePages(); ResumeLayout(true);
+        RefreshHomePages(); UpdateFavorites(); ResumeLayout(true);
     }
-    void RefreshHomePages() { ShowHome(homePage); foreach (var tab in tabs.TabPages.ToArray()) if (tab.Home != null) ShowHome(tab); }
+    void RefreshHomePages() { ShowHome(homePage); }
     internal void PlayIntro() { var intro = new IntroSurface(Surface, Accent); Controls.Add(intro); intro.BringToFront(); intro.Focus(); }
     void UpdateCounters()
     {
         counters.RemoveAll(c => c.IsDisposed);
-        foreach (var label in counters) label.Text = $"{blockedRequests:N0}   blocked requests  ·  Ads & trackers\nThis session · reported network blocks, not a count of unique ads";
+        foreach (var label in counters) label.Text = $"{blockedRequests:N0} blocked requests\nAds & trackers · this session";
     }
     void ShowHome(SiteTab tab)
     {
         tab.Home?.Dispose();
         if (prefs.Background && wallpaper == null) try { using var image = Image.FromFile(Path.Combine(root, "background.jpg")); wallpaper = new Bitmap(image); } catch (Exception ex) when (ex is IOException or ArgumentException or OutOfMemoryException) { }
         var home = new HomeSurface { Dock = DockStyle.Fill, BackColor = Surface, ForeColor = Ink, Wallpaper = prefs.Background ? wallpaper : null, FillImage = prefs.BackgroundFit == "Fill" };
-        var center = new FlowLayoutPanel { Width = 620, Height = 275, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24), BackColor = Surface, ForeColor = Ink };
-        var wordmark = new Label { Text = "N 0 V A", Width = 560, Height = 100, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 44), ForeColor = Accent };
+        var center = new SoftSurface { Width = 490, Height = 240, Radius = 26, FillColor = Color.FromArgb(210, Surface), ForeColor = Ink };
+        var wordmark = new Label { Text = "N 0 V A", Left = 20, Top = 22, Width = 450, Height = 70, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 34), ForeColor = Accent, BackColor = Color.Transparent };
         center.Controls.Add(wordmark);
-        var searchBox = new SoftSurface { Width = 560, Height = 50, Padding = new Padding(20, 12, 20, 12), Margin = new Padding(0, 12, 0, 8) };
-        var search = new TextBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 13), PlaceholderText = "Search or enter an address", BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None, AccessibleName = "Search or enter address" };
+        var searchBox = new SoftSurface { Left = 24, Top = 110, Width = 442, Height = 46, FillColor = InputSurface, Padding = new Padding(18, 12, 18, 10) };
+        var search = new TextBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 12), PlaceholderText = "Search " + prefs.SearchEngine + " or enter address", BackColor = InputSurface, ForeColor = Ink, BorderStyle = BorderStyle.None, AccessibleName = "Search or enter address" };
         search.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; address.Text = search.Text; await NavigateInput(); } }; searchBox.Controls.Add(search); center.Controls.Add(searchBox);
         if (prefs.ShowFavorites) {
-            var favorites = new FlowLayoutPanel { Width = 560, Height = 90, WrapContents = true };
-            foreach (var favorite in library.Bookmarks.Take(6)) {
-                var label = new Uri(favorite.Url).IdnHost; var b = ActionButton(label, () => _ = Navigate(tab, favorite.Url)); b.MaximumSize = new Size(170, 34); favorites.Controls.Add(b);
+            var favorites = library.Bookmarks.Take(8).ToArray();
+            for (int i = 0; i < favorites.Length; i++) {
+                var favorite = favorites[i]; var icon = ReadFavoriteIcon(favorite.Url);
+                var button = new SoftButton { Text = icon == null ? new Uri(favorite.Url).IdnHost[..1].ToUpperInvariant() : "", Image = icon, Left = (490 - favorites.Length * 48) / 2 + i * 48, Top = 177, Width = 40, Height = 40, ForeColor = Ink, AccessibleName = favorite.Title, Cursor = Cursors.Hand };
+                button.Click += (_, _) => _ = Navigate(tab, favorite.Url); button.Disposed += (_, _) => icon?.Dispose(); favoriteTips.SetToolTip(button, favorite.Title + "\n" + new Uri(favorite.Url).IdnHost); center.Controls.Add(button);
             }
-            center.Controls.Add(favorites);
         }
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = Surface, ForeColor = Ink, Padding = new Padding(132, 8, 132, 8) };
-        var credits = ActionButton("Credits", OpenCredits); credits.AutoSize = false; credits.SetBounds(18, 24, 100, 32);
-        var personalize = ActionButton("Personalize", () => OpenSettings("Appearance")); personalize.AutoSize = false; personalize.SetBounds(0, 24, 100, 32);
-        footer.Resize += (_, _) => personalize.Left = footer.Width - 118;
-        var count = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9), UseMnemonic = false }; counters.Add(count);
-        footer.Controls.Add(count); footer.Controls.Add(credits); footer.Controls.Add(personalize); UpdateCounters();
-        home.Controls.Add(center); home.Controls.Add(footer);
-        if (prefs.ShowClock) home.Controls.Add(new Label { Dock = DockStyle.Top, Height = 48, Text = DateTime.Now.ToString("ddd, MMM d  ·  HH:mm"), TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(12), BackColor = Surface, ForeColor = Ink });
-        void Place() { center.Width = Math.Min(620, Math.Max(260, home.Width - 32)); searchBox.Width = wordmark.Width = center.Width - 48; center.Left = Math.Max(16, (home.Width - center.Width) / 2); center.Top = Math.Max(28, (home.Height - footer.Height - center.Height) / 2); }
+        var credits = ActionButton("Credits", OpenCredits); credits.AutoSize = false; credits.Size = new Size(90, 32);
+        var personalize = ActionButton("Personalize", () => OpenSettings("Appearance")); personalize.AutoSize = false; personalize.Size = new Size(100, 32);
+        var stats = new SoftSurface { Size = new Size(260, 54), FillColor = Color.FromArgb(175, Surface), Radius = 20 };
+        var count = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9), BackColor = Color.Transparent, UseMnemonic = false }; counters.Add(count); stats.Controls.Add(count);
+        favoriteTips.SetToolTip(count, "Network requests reported blocked during this session; not a count of unique ads."); UpdateCounters();
+        home.Controls.Add(center); home.Controls.Add(credits); home.Controls.Add(personalize); home.Controls.Add(stats);
+        if (prefs.ShowClock) home.Controls.Add(new Label { Dock = DockStyle.Top, Height = 48, Text = DateTime.Now.ToString("ddd, MMM d  ·  HH:mm"), TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(12), BackColor = Color.Transparent, ForeColor = Ink });
+        void Place() { center.Left = (home.Width - center.Width) / 2; center.Top = Math.Max(24, (home.Height - center.Height) / 2 - 28); credits.Location = new Point(20, home.Height - 54); personalize.Location = new Point(home.Width - 120, home.Height - 54); stats.Location = new Point((home.Width - stats.Width) / 2, home.Height - 72); }
         home.Resize += (_, _) => Place(); tab.Controls.Add(home); tab.Home = home; Place(); home.BringToFront();
+        if (prefs.Animations && !IntegrationTest && tab == Current) {
+            var target = center.Top; center.Top += 12; var timer = new System.Windows.Forms.Timer { Interval = 16 };
+            timer.Tick += (_, _) => { if (center.IsDisposed) { timer.Dispose(); return; } center.Top -= Math.Max(1, (center.Top - target) / 3); if (center.Top <= target) { center.Top = target; timer.Dispose(); } };
+            center.Disposed += (_, _) => timer.Dispose(); timer.Start();
+        }
     }
+
     internal void OpenSettings() => OpenSettings("Privacy");
     void OpenSettings(string selected)
     {
@@ -128,10 +134,10 @@ internal sealed partial class BrowserWindow
                     using var pick = new OpenFileDialog { Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp" }; if (pick.ShowDialog(dialog) != DialogResult.OK) return;
                     try { if (new FileInfo(pick.FileName).Length > 20 * 1024 * 1024) throw new IOException("Choose an image under 20 MB."); using var input = Image.FromFile(pick.FileName); if ((long)input.Width * input.Height > 40000000) throw new IOException("Choose an image under 40 megapixels."); var scale = Math.Min(1d, 2560d / Math.Max(input.Width, input.Height)); using var small = new Bitmap(input, Math.Max(1, (int)(input.Width * scale)), Math.Max(1, (int)(input.Height * scale))); Directory.CreateDirectory(root); small.Save(Path.Combine(root, "background.tmp"), ImageFormat.Jpeg); File.Move(Path.Combine(root, "background.tmp"), Path.Combine(root, "background.jpg"), true); foreach (var tab in tabs.TabPages.Append(homePage)) if (tab.Home is HomeSurface h) h.Wallpaper = null; wallpaper?.Dispose(); wallpaper = null; draft.Background = true; Page(name); } catch (Exception ex) { MessageBox.Show(dialog, ex.Message); }
                 }));
-                Toggle("Startup animation (click or press a key to skip)", draft.Animations, v => draft.Animations = v);
+                Toggle("Animations and hover effects (startup can be skipped)", draft.Animations, v => draft.Animations = v);
                 Toggle("Show favorites on home", draft.ShowFavorites, v => draft.ShowFavorites = v);
                 Toggle("Show date and time on home", draft.ShowClock, v => draft.ShowClock = v);
-                Pick("Search engine", ["DuckDuckGo", "Brave Search"], draft.SearchEngine, v => draft.SearchEngine = v);
+                Pick("Search engine", Policy.SearchEngines, draft.SearchEngine, v => draft.SearchEngine = v);
             } else if (name == "Toolbar") {
                 wrap.Controls.Add(Caption("Choose the tools to show. Select a row, then move it up or down to change its order. The menu always stays available."));
                 var order = (draft.ToolOrder ?? []).Where(DefaultTools.Contains).Concat(DefaultTools).Distinct().ToArray();
@@ -165,7 +171,7 @@ internal sealed partial class BrowserWindow
                 wrap.Controls.Add(Caption("Why is this such a good browser?", 18));
                 wrap.Controls.Add(Caption("The aim is simple: useful controls without clutter. Ad and tracker blocking is on by default, temporary browsing data is the default, and there is no N0VA analytics service. The native interface shares the installed WebView2 runtime and sleeps idle tabs."));
                 wrap.Controls.Add(Caption("Those are design choices, not a claim of perfect privacy or best-in-class performance. Microsoft runtime services can contact Microsoft. This is an unsigned, unaudited preview, and public IP privacy needs a working VPN or proxy."));
-                wrap.Controls.Add(Caption("N0VA Browser 0.3.0 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
+                wrap.Controls.Add(Caption("N0VA Browser 0.4.0 · WebView2 " + RuntimeVersion() + "\nuBlock Origin Lite " + Blocker.Version + "\nInstall new N0VA releases for app and bundled filter updates.", 10));
                 wrap.Controls.Add(ActionButton("Credits", () => { dialog.Close(); OpenCredits(); }));
                 Toggle("Check for app updates when N0VA opens", draft.CheckUpdates, v => draft.CheckUpdates = v);
                 wrap.Controls.Add(Caption("Checks GitHub through your current connection. You can choose No when an update is offered; installers never run automatically.", 10));

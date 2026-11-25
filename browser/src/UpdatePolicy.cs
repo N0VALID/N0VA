@@ -6,7 +6,7 @@ namespace Nova;
 internal record AppUpdate(Version Version, string Url);
 internal static class UpdatePolicy
 {
-    public const string Current = "0.3.0";
+    public const string Current = "0.4.0";
     public const string Repository = "N0VALID/N0VA";
     public static AppUpdate? Parse(string json)
     {

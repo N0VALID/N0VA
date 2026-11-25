@@ -11,91 +11,85 @@ internal sealed partial class BrowserWindow
     readonly Dictionary<Transfer, (Label Text, Button Pause, Button Cancel)> transferControls = [];
     readonly Label panelTitle = new() { AutoSize = true, Font = new Font("Segoe UI", 20), Margin = new Padding(0, 8, 0, 8) };
     readonly Label panelHint = new() { Width = 345, Height = 44 };
-    Button? refreshFiles;
     bool siteFilesMode = true;
     internal bool SiteFilesButtonVisible => files.Visible;
     static void ClearControls(Control owner) { while (owner.Controls.Count > 0) owner.Controls[0].Dispose(); }
-    internal const string ScanScript = """
-        (() => {
-          const result = [], seen = new Set();
-          const pattern = /\.(?:exe|msi|msix|zip|7z|rar|tar|gz|bz2|xz|pdf|epub|dmg|pkg|deb|rpm|apk|iso|img|mp3|mp4|wav|ogg|webm|csv|docx?|xlsx?|pptx?)(?:$)/i;
-          const add = (name, url, kind) => { if (!seen.has(url)) { seen.add(url); result.push({name:name.slice(0,240),url,kind}); } };
-          const release = u => u.hostname === 'github.com' && /^\/[^/]+\/[^/]+\/releases(?:\/(?:latest|tag\/[^?#]+))?\/?$/.test(u.pathname);
-          const here = new URL(location.href); if (release(here)) add('Release files', here.href, 'Release');
-          for (const a of Array.from(document.querySelectorAll('a[href]')).slice(0, 10000)) {
-            let u; try { u = new URL(a.href, document.baseURI); } catch { continue; }
-            if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || u.href.length > 8192) continue;
-            if (u.hash && u.origin === here.origin && u.pathname === here.pathname) continue;
-            const direct = a.hasAttribute('download') || pattern.test(u.pathname);
-            const kind = release(u) ? 'Release' : direct ? 'File' : /download/i.test((a.textContent || '') + ' ' + (a.getAttribute('aria-label') || '')) ? 'Page' : '';
-            if (!kind) continue;
-            u.hash = '';
-            let name = direct ? a.getAttribute('download') || u.pathname.split('/').pop() || 'download' : (a.textContent || '').trim() || 'Download page';
-            try { name = decodeURIComponent(name); } catch {}
-            add(name, u.href, kind); if (result.length >= 100) break;
-          }
-          return result;
-        })()
-        """;
+    readonly System.Windows.Forms.Timer fileScanTimer = new() { Interval = 1000 };
+    bool scanning;
+    string lastScan = "";
+    readonly Dictionary<string, List<PageFile>> releaseFiles = [];
+    internal int DiscoveredFileCount => fileList.Controls.Count;
+    internal const string ScanScript = DownloadDiscovery.Script;
     void BuildDownloads()
     {
-        var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 160, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
-        head.Controls.Add(panelTitle); head.Controls.Add(panelHint);
-        refreshFiles = ActionButton("Refresh links", () => _ = RefreshFiles()); head.Controls.Add(refreshFiles);
-        head.Controls.Add(ActionButton("Close", () => downloadPopup.Close()));
-        downloads.Controls.Add(fileList); downloads.Controls.Add(transfers); downloads.Controls.Add(head);
-        transfers.Visible = false;
+        var head = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 108, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        var titleRow = new Panel { Width = 360, Height = 40 };
+        panelTitle.Font = new Font("Segoe UI", 18); panelTitle.Location = new Point(0, 3); titleRow.Controls.Add(panelTitle);
+        var close = ActionButton("Close", () => downloadPopup.Close()); close.AutoSize = false; close.MinimumSize = Size.Empty; close.SetBounds(288, 0, 68, 34); titleRow.Controls.Add(close);
+        head.Controls.Add(titleRow); panelHint.Width = 350; panelHint.Height = 48; head.Controls.Add(panelHint);
+        downloads.Controls.Add(fileList); downloads.Controls.Add(transfers); downloads.Controls.Add(head); transfers.Visible = false;
+        fileScanTimer.Tick += async (_, _) => { if (DownloadsOpen && siteFilesMode) await RefreshFiles(); else fileScanTimer.Stop(); };
     }
     void PanelMode(bool site)
     {
         siteFilesMode = site; panelTitle.Text = site ? "Site files" : "Downloads";
-        panelHint.Text = site ? "Links found on this page. Release lists load only when you request them." : "Your transfers and saved history. Files never run automatically.";
-        refreshFiles!.Visible = site; fileList.Visible = site; transfers.Visible = !site;
-        ShowDownloadsPopup();
+        panelHint.Text = site ? "Updates automatically while open. Choose a file or a download page." : "Your transfers and saved history.";
+        fileList.Visible = site; transfers.Visible = !site; ShowDownloadsPopup();
+        if (site) fileScanTimer.Start(); else fileScanTimer.Stop();
     }
-    void ToggleDownloads() { if (DownloadsOpen && siteFilesMode) { downloadPopup.Close(); return; } PanelMode(true); _ = RefreshFiles(); }
+    void ToggleDownloads() { if (DownloadsOpen && siteFilesMode) { downloadPopup.Close(); return; } lastScan = ""; PanelMode(true); _ = RefreshFiles(); }
     internal void ShowTransfers() { PanelMode(false); RenderTransfers(); }
     internal async Task<List<PageFile>> ScanFiles(SiteTab t)
     {
         if (!t.Ready) return [];
         var json = await t.View!.CoreWebView2.ExecuteScriptAsync(ScanScript);
-        return json.Length > 1200000 ? [] : Policy.ParseLinks(json, prefs.AllowHttp);
+        var links = json.Length > 1200000 ? new List<PageFile>() : Policy.ParseLinks(json, prefs.AllowHttp);
+        var official = DownloadDiscovery.Official(t.View.CoreWebView2.Source);
+        if (official != null && links.All(x => x.Url != official.Url)) links.Insert(0, official);
+        return links;
     }
     async Task RefreshFiles()
     {
-        if (!siteFilesMode) return;
-        var generation = ++scanGeneration; var t = Current;
-        ClearControls(fileList);
+        if (!siteFilesMode || scanning) return;
+        var generation = scanGeneration; var t = Current;
         if (t?.Ready != true) { if (DownloadsOpen) downloadPopup.Close(); return; }
+        scanning = true;
         try {
             var links = await ScanFiles(t);
-            if (closing || generation != scanGeneration || t != Current) return;
-            if (links.Count == 0) fileList.Controls.Add(new Label { Text = "No download links found.\n\nPress Refresh after the site adds links. Some websites generate files only after you press their own download button. Those transfers appear under Downloads.", Width = 335, Height = 130 });
-            foreach (var link in links) AddFileCard(link, t, generation);
-        } catch (Exception ex) { if (!closing && generation == scanGeneration) fileList.Controls.Add(Caption("Could not read download links: " + ex.Message)); }
+            if (closing || generation != scanGeneration || t != Current || !siteFilesMode) return;
+            var key = System.Text.Json.JsonSerializer.Serialize(links);
+            if (key == lastScan && fileList.Controls.Count > 0) return;
+            lastScan = key; var scroll = fileList.VerticalScroll.Value; ClearControls(fileList);
+            if (links.Count == 0) fileList.Controls.Add(new Label { Text = "Looking for files and download controls…\n\nThis list updates as the page loads. Some sites create a file only after you use their download button.", Width = 350, Height = 112 });
+            foreach (var link in links) { AddFileCard(link, t, generation); if (releaseFiles.TryGetValue(link.Url, out var assets)) foreach (var asset in assets) AddFileCard(asset, t, generation); }
+            fileList.AutoScrollPosition = new Point(0, scroll);
+        } catch (Exception ex) { if (!closing && generation == scanGeneration) panelHint.Text = "Could not inspect this page: " + ex.Message; }
+        finally { scanning = false; }
     }
     void AddFileCard(PageFile link, SiteTab tab, int generation)
     {
-        var card = new FlowLayoutPanel { Width = 337, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 8, 0, 12) };
-        card.Controls.Add(new Label { Text = link.Name, Width = 325, AutoSize = true, MaximumSize = new Size(325, 0), Font = new Font(Font, FontStyle.Bold), UseMnemonic = false });
-        card.Controls.Add(new Label { Text = new Uri(link.Url).IdnHost + (Policy.RiskyFile(link.Name) ? " · executable" : ""), Width = 325, AutoSize = true, MaximumSize = new Size(325, 0), UseMnemonic = false });
-        if (ReleaseDiscovery.Target(link.Url) != null) {
-            var resolve = ActionButton("Load release files", () => { });
-            resolve.Click += async (_, _) => {
-                resolve.Enabled = false; resolve.Text = "Loading…";
-                try {
-                    var assets = await ReleaseDiscovery.Fetch(link.Url, connection);
-                    if (closing || generation != scanGeneration || tab != Current || card.IsDisposed) return;
-                    if (assets.Count == 0) card.Controls.Add(Caption("No public release assets found."));
-                    foreach (var file in assets) AddFileCard(file, tab, generation);
-                    resolve.Text = "Release files loaded";
-                } catch (Exception ex) { if (!card.IsDisposed) { resolve.Enabled = true; resolve.Text = "Try release files again"; card.Controls.Add(Caption("Could not load assets: " + ex.Message)); } }
-            }; card.Controls.Add(resolve);
-        }
-        card.Controls.Add(ActionButton(link.Kind == "File" ? "Open / download…" : "Open download page", () => {
-            if (Current != tab || !Policy.WebUrl(link.Url, prefs.AllowHttp)) return;
-            if (MessageBox.Show(this, link.Url + "\n\nOpen this link? The website controls its contents.", "Download source", MessageBoxButtons.OKCancel) == DialogResult.OK) _ = Navigate(tab, link.Url, downloadHandoff: link.Kind == "File");
-        }));
+        var card = new FlowLayoutPanel { Width = 350, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 2, 0, 10), Margin = new Padding(0, 0, 0, 6) };
+        var open = ActionButton(link.Name, () => { }); open.AutoSize = false; open.Width = 346; open.Height = 38; open.Margin = new Padding(0, 4, 0, 3); open.AccessibleName = link.Name;
+        open.Click += async (_, _) => {
+            if (Current != tab || generation != scanGeneration || !Policy.WebUrl(link.Url, prefs.AllowHttp)) return;
+            if (link.Kind == "Action") {
+                if (link.ActionId == null || !System.Text.RegularExpressions.Regex.IsMatch(link.ActionId, "^n[a-f0-9]+$")) return;
+                downloadPopup.Close();
+                var id = System.Text.Json.JsonSerializer.Serialize(link.ActionId);
+                await tab.View!.CoreWebView2.ExecuteScriptAsync("(() => { const find = root => { for (const e of root.querySelectorAll('*')) { if (e.dataset?.novaDownload === " + id + ") { e.scrollIntoView({block:'center',behavior:'smooth'}); e.focus(); const old=e.style.outline; e.style.outline='3px solid #7eafd4'; setTimeout(()=>e.style.outline=old,2200); return true; } if (e.shadowRoot && find(e.shadowRoot)) return true; if(e.tagName==='IFRAME') try { if(e.contentDocument && find(e.contentDocument)) return true; } catch{} } }; find(document); })()");
+                return;
+            }
+            if (ReleaseDiscovery.Target(link.Url) != null) {
+                open.Enabled = false; open.Text = "Loading release files…";
+                try { var assets = await ReleaseDiscovery.Fetch(link.Url, connection); if (closing || generation != scanGeneration || tab != Current) return; releaseFiles[link.Url] = assets; lastScan = ""; await RefreshFiles(); }
+                catch (Exception ex) { if (!card.IsDisposed) { open.Enabled = true; open.Text = link.Name; panelHint.Text = "Could not load release files: " + ex.Message; } }
+                return;
+            }
+            await Navigate(tab, link.Url, downloadHandoff: link.Kind == "File");
+        };
+        card.Controls.Add(open);
+        var kind = link.Kind switch { "Action" => "Show button on page", "Release" => "Show release files", "File" => "Download / open", _ => "Download page" };
+        card.Controls.Add(new Label { Text = new Uri(link.Url).IdnHost + " · " + kind, Width = 346, AutoSize = true, MaximumSize = new Size(346, 0), Font = new Font(Font.FontFamily, 9), UseMnemonic = false, Margin = Padding.Empty });
         fileList.Controls.Add(card);
     }
     void RenderTransfers()

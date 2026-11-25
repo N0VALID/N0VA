@@ -8,6 +8,7 @@ namespace Nova;
 // Runs only when explicitly invoked by CI; uses an isolated, disposable data directory.
 internal static class Smoke
 {
+    static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(Descendants(c)));
     public static int Run()
     {
         var root = Path.Combine(Path.GetTempPath(), "nova-smoke-" + Guid.NewGuid().ToString("N"));
@@ -31,11 +32,12 @@ internal static class Smoke
                     using var reader = new StreamReader(stream, leaveOpen: true);
                     var request = await reader.ReadLineAsync(timeout.Token);
                     while (await reader.ReadLineAsync(timeout.Token) is { Length: > 0 }) { }
-                    var html = "<title>N0VA fixture</title><a href='/app.zip'>app</a><a href='/app.zip'>duplicate</a><a download='manual.pdf' href='/get?id=2'>manual</a><a download href='javascript:alert(1)'>bad</a>";
+                    var html = "<title>N0VA fixture</title><link rel='icon' href='/favicon.svg'><a href='/app.zip'>app</a><a href='/app.zip'>duplicate</a><a download='manual.pdf' href='/get?id=2'>manual</a><a download href='javascript:alert(1)'>bad</a>";
                     var path = request?.Split(' ')[1] ?? "/";
                     if (path is "/redirect" or "/file-redirect") {
                         await stream.WriteAsync(Encoding.UTF8.GetBytes("HTTP/1.1 302 Found\r\nLocation: " + origin.Replace("127.0.0.1", "localhost") + (path == "/file-redirect" ? "/app.zip" : "/arrived") + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), timeout.Token); return;
                     }
+                    if (path == "/favicon.svg") html = "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' rx='6' fill='#5295c0'/><text x='8' y='24' fill='white' font-size='24'>N</text></svg>";
                     if (path == "/arrived") html = "<title>Arrived</title>";
                     if (path == "/same") html = "<title>Same origin</title><script>setTimeout(()=>location.href='/arrived',100)</script>";
                     if (path == "/script") html = "<title>Script</title><script>setTimeout(()=>location.href='" + origin.Replace("127.0.0.1", "localhost") + "/arrived',100)</script>";
@@ -43,7 +45,7 @@ internal static class Smoke
                     if (path == "/release") html = "<title>Release fixture</title><a href='https://github.com/rustdesk/rustdesk/releases/latest'>Download RustDesk</a>";
                     var attachment = request?.StartsWith("GET /app.zip ") == true;
                     if (attachment) html = "N0VA download fixture";
-                    var contentType = attachment ? "application/octet-stream\r\nContent-Disposition: attachment; filename=app.zip" : "text/html";
+                    var contentType = attachment ? "application/octet-stream\r\nContent-Disposition: attachment; filename=app.zip" : path == "/favicon.svg" ? "image/svg+xml" : "text/html";
                     var bytes = Encoding.UTF8.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nConnection: close\r\nContent-Length: " + Encoding.UTF8.GetByteCount(html) + "\r\n\r\n" + html);
                     await stream.WriteAsync(bytes, timeout.Token);
                     } catch (OperationCanceledException) { } catch (IOException) { }
@@ -71,7 +73,32 @@ internal static class Smoke
                 if (c.Profile.PreferredTrackingPreventionLevel != CoreWebView2TrackingPreventionLevel.Strict || c.Settings.IsWebMessageEnabled || c.Settings.AreHostObjectsAllowed || !c.Settings.IsReputationCheckingRequired) throw new Exception("Privacy settings missing");
                 var links = await window.ScanFiles(t);
                 if (links.Count != 2 || !links.Any(x => x.Name == "manual.pdf")) throw new Exception("Download discovery failed: " + links.Count);
+                window.Activate(); t.View.Focus(); await Task.Delay(150);
+                SendKeys.SendWait("{F11}"); await Task.Delay(250);
+                if (!window.IsFullscreen || window.FormBorderStyle != FormBorderStyle.None || window.WebAcceleratorCount == 0) throw new Exception("F11 did not reach the browser from focused web content");
+                SendKeys.SendWait("{F11}"); await Task.Delay(200);
+                if (window.IsFullscreen) throw new Exception("F11 did not restore the window");
+                SendKeys.SendWait("^t"); await Task.Delay(200);
+                if (window.Current == t || window.WebsiteTabCount != 1) throw new Exception("Ctrl+T failed from web content");
+                window.HandleShortcut(Keys.Control | Keys.W);
+                if (window.Current != t) throw new Exception("Ctrl+W on home did not return to website");
+                await window.Navigate(window.AddTab(), origin + "/extra"); var extra = window.Current!;
+                deadline = DateTime.UtcNow.AddSeconds(10); while (extra.Loading && DateTime.UtcNow < deadline) await Task.Delay(100);
+                extra.View!.Focus(); await Task.Delay(100); SendKeys.SendWait("^w"); await Task.Delay(200);
+                if (!extra.IsDisposed || window.WebsiteTabCount != 1 || window.Current != t) throw new Exception("Ctrl+W failed from web content");
+                window.InvokeTool("Site files");
+                deadline = DateTime.UtcNow.AddSeconds(5); while (window.DiscoveredFileCount < 2 && DateTime.UtcNow < deadline) await Task.Delay(100);
+                await c.ExecuteScriptAsync("setTimeout(()=>{const a=document.createElement('a');a.href='/late.zip';a.textContent='late.zip';document.body.append(a); const host=document.createElement('div'); document.body.append(host);host.attachShadow({mode:'open'}).innerHTML='<button data-download-url=\"/shadow.zip\">Download</button>';},200)");
+                deadline = DateTime.UtcNow.AddSeconds(8); while (window.DiscoveredFileCount < 4 && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (window.DiscoveredFileCount < 4) throw new Exception("Site files did not update automatically for late/shadow links");
+                using (var popupShot = new Bitmap(window.DownloadPanel.Width, window.DownloadPanel.Height)) { window.DownloadPanel.DrawToBitmap(popupShot, new Rectangle(Point.Empty, popupShot.Size)); popupShot.Save(Path.Combine(AppContext.BaseDirectory, "downloads.png")); }
+                window.InvokeTool("Site files");
                 window.BookmarkCurrent();
+                deadline = DateTime.UtcNow.AddSeconds(8); while ((!Directory.Exists(Path.Combine(root, "Favicons")) || !Directory.GetFiles(Path.Combine(root, "Favicons"), "*.png").Any()) && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (window.FavoriteIconCount != 1 || !Directory.Exists(Path.Combine(root, "Favicons"))) throw new Exception("Favorite icon was not cached");
+                await window.Navigate(t, origin + "/arrived"); await Task.Delay(200); window.OpenFavoriteIcon(0);
+                deadline = DateTime.UtcNow.AddSeconds(10); while (c.DocumentTitle != "N0VA fixture" && DateTime.UtcNow < deadline) await Task.Delay(100);
+                if (c.DocumentTitle != "N0VA fixture") throw new Exception("Favorite icon did not open its page");
                 if (Library.Load(Path.Combine(root, "library.json")).Bookmarks.Count != 1) throw new Exception("Favorite did not persist");
                 await window.SetBlocking(false);
                 if ((await c.Profile.GetBrowserExtensionsAsync()).Any(x => x.IsEnabled && x.Name.Contains("uBlock"))) throw new Exception("Blocker toggle did not disable");
@@ -140,13 +167,14 @@ internal static class Smoke
                             var nav = settings.Controls.OfType<FlowLayoutPanel>().Single(p => p.Dock == DockStyle.Left);
                             nav.Controls.OfType<Button>().Single(b => b.Text == "Appearance").PerformClick();
                             var body = settings.Controls.OfType<FlowLayoutPanel>().Single(p => p.Dock == DockStyle.Fill);
-                            body.Controls.OfType<ComboBox>().ElementAt(1).SelectedItem = "Blue";
+                            body.Controls.OfType<ComboBox>().ElementAt(1).SelectedItem = "Blue"; body.Controls.OfType<ComboBox>().Last().SelectedItem = "Google";
                             using var settingsShot = new Bitmap(settings.Width, settings.Height); settings.DrawToBitmap(settingsShot, new Rectangle(0, 0, settings.Width, settings.Height)); settingsShot.Save(Path.Combine(AppContext.BaseDirectory, "settings.png"));
                             body.Controls.OfType<Button>().Single(b => b.Text == "Save preferences").PerformClick();
                         } catch (Exception error) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "settings-error.txt"), error.ToString()); settings.Close(); }
                     };
                     ui.Start(); window.OpenSettings();
                 }
+                if (Preferences.Load(Path.Combine(root, "preferences.json")).SearchEngine != "Google") throw new Exception("Search engine selection did not persist");
                 if (Preferences.Load(Path.Combine(root, "preferences.json")).Accent != "Blue") throw new Exception("Settings UI did not save appearance");
                 using (var ui = new System.Windows.Forms.Timer { Interval = 100 }) {
                     ui.Tick += (_, _) => {
@@ -177,7 +205,10 @@ internal static class Smoke
                             body.Controls.OfType<CheckBox>().Single().Checked = true;
                             body.Controls.OfType<ComboBox>().Single().SelectedIndex = 3;
                             body.Controls.OfType<TextBox>().Single().Text = "socks5://127.0.0.1:19050";
-                            body.Controls.OfType<Button>().Single(b => b.Text == "Save connection").PerformClick();
+                            window.ProbeRoute = _ => Task.FromResult(new RouteCheck(false, "Unavailable test service"));
+                            var saveConnection = Descendants(body).OfType<Button>().Single(b => b.Text == "Save connection"); saveConnection.PerformClick();
+                            if (Preferences.Load(Path.Combine(root, "preferences.json")).ProxyEnabled) throw new Exception("Unavailable proxy was saved");
+                            window.ProbeRoute = _ => Task.FromResult(new RouteCheck(true, "Connection works · test IP 203.0.113.8")); saveConnection.PerformClick();
                             if (!body.Controls.OfType<Label>().Single(l => l.Name == "ConnectionStatus").Text.Contains("Restart N0VA")) throw new Exception("Connection save feedback missing");
                             using var shot = new Bitmap(dialog.Width, dialog.Height); dialog.DrawToBitmap(shot, new Rectangle(0, 0, dialog.Width, dialog.Height)); shot.Save(Path.Combine(AppContext.BaseDirectory, "connection.png"));
                         } catch (Exception error) { connectionError = error; }
@@ -203,7 +234,7 @@ internal static class Smoke
                 if (!window.DownloadsOpen || widthBefore != window.ViewportWidth) throw new Exception("Download popup resized the page");
                 var panel = window.DownloadPanel;
                 var header = panel.Controls.OfType<FlowLayoutPanel>().First(p => p.Dock == DockStyle.Top);
-                var close = header.Controls.OfType<Button>().Single(b => b.Text == "Close");
+                var close = Descendants(header).OfType<Button>().Single(b => b.Text == "Close");
                 if (close.Bottom > header.ClientSize.Height) throw new Exception("Download panel Close control is clipped"); close.PerformClick();
                 window.AddTab();
                 if (window.WebsiteTabCount != 1) throw new Exception("Returning home created a website tab");
@@ -215,7 +246,10 @@ internal static class Smoke
                 if (window.Controls.OfType<IntroSurface>().Any()) throw new Exception("Intro did not stop");
                 using var screenshot = new Bitmap(window.Width, window.Height); window.DrawToBitmap(screenshot, window.Bounds with { X = 0, Y = 0 });
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png"));
-                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, redirect compatibility (HTTP/same-site/file chains) and cross-site script/meta blocking, blocker toggle, runtime block counter, favorites/history, release detection, credits, animation and resize, saved settings, toolbar visibility/order, home outside website tabs, popup geometry, Connection window/save, update No option.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
+                using (var background = new Bitmap(800, 600)) { using var g = Graphics.FromImage(background); using var brush = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 800, 600), Color.FromArgb(75, 130, 156), Color.FromArgb(158, 95, 115), 35f); g.FillRectangle(brush, 0, 0, 800, 600); background.Save(Path.Combine(root, "background.jpg"), System.Drawing.Imaging.ImageFormat.Jpeg); }
+                window.Preferences.Background = true; window.AddTab(); await Task.Delay(200);
+                using (var backgroundShot = new Bitmap(window.Width, window.Height)) { window.DrawToBitmap(backgroundShot, new Rectangle(Point.Empty, backgroundShot.Size)); backgroundShot.Save(Path.Combine(AppContext.BaseDirectory, "background.png")); }
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "PASS: native window, runtime, verified uBOL extension, strict tracking, download discovery, confirmed/canceled downloads, Internet zone marker, unsafe navigation rejection, redirect compatibility (HTTP/same-site/file chains) and cross-site script/meta blocking, blocker toggle, runtime block counter, favorites/history, release detection, credits, animation and resize, saved settings, toolbar visibility/order, home outside website tabs, popup geometry, Connection failure/save, update No option, native web-focused Ctrl+T/Ctrl+W/F11, cached favicon navigation, live Site files/shadow DOM scanning, Google selection, wallpaper overlays.\nRuntime: " + CoreWebView2Environment.GetAvailableBrowserVersionString());
                 result = 0;
             } catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), ex.ToString());
                 try { using var shot = new Bitmap(window.Width, window.Height); window.DrawToBitmap(shot, new Rectangle(0, 0, window.Width, window.Height)); shot.Save(Path.Combine(AppContext.BaseDirectory, "smoke.png")); } catch { }

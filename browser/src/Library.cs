@@ -10,7 +10,7 @@ internal sealed partial class BrowserWindow
         var existing = library.Bookmarks.FirstOrDefault(b => b.Url == c.Source);
         if (existing != null) library.Bookmarks.Remove(existing);
         else { if (library.Bookmarks.Count >= 300) { Notice("Remove a favorite before adding another (limit 300)."); return; } library.Bookmarks.Add(new(c.DocumentTitle, c.Source)); }
-        SaveLibrary(); Sync(); RefreshHomePages();
+        SaveLibrary(); SaveFavicon(Current); UpdateFavorites(); Sync(); RefreshHomePages();
     }
     void OpenFavorites()
     {
@@ -21,7 +21,7 @@ internal sealed partial class BrowserWindow
         foreach (var favorite in library.Bookmarks.ToArray()) {
             var row = new FlowLayoutPanel { Width = 590, Height = 82 };
             var open = ActionButton(favorite.Title.Length > 50 ? favorite.Title[..50] + "…" : favorite.Title, () => { dialog.Close(); _ = Navigate(AddTab(), favorite.Url); }); open.MaximumSize = new Size(440, 40); open.UseMnemonic = false;
-            row.Controls.Add(open); row.Controls.Add(ActionButton("Remove", () => { library.Bookmarks.Remove(favorite); SaveLibrary(); row.Dispose(); Sync(); RefreshHomePages(); }));
+            row.Controls.Add(open); row.Controls.Add(ActionButton("Remove", () => { library.Bookmarks.Remove(favorite); SaveLibrary(); row.Dispose(); UpdateFavorites(); Sync(); RefreshHomePages(); }));
             wrap.Controls.Add(row);
         }
         dialog.ShowDialog(this);
